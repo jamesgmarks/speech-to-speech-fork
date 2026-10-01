@@ -232,3 +232,7 @@ uv.lock
 
 # JavaScript dependencies
 node_modules/
+
+# Local workspace files
+.DS_Store
+/TODO.md
