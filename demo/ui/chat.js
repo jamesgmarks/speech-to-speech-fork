@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * ChatView — owns the whole conversation surface: the slide-in history panel,
+ * ChatView — owns the whole conversation surface: the collapsible history panel,
  * the ephemeral on-orb bubbles, and all the transcript/tool/streaming
  * and user-audio bookkeeping. main.js wires the realtime client's events
  * straight to the `on*` methods here and otherwise doesn't touch chat state.
@@ -21,6 +21,7 @@ import { $, escHtml, DEBUG } from "./dom.js";
 const WRENCH_PATH = `<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>`;
 const CHAT_BUBBLE_SVG = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
 const EMPTY_STATE_HTML = `<div id="chat-empty" class="chat-empty">${CHAT_BUBBLE_SVG}<span class="chat-empty-title">No messages yet</span><span class="chat-empty-hint">Tap the orb and start talking</span></div>`;
+const PANEL_STORAGE_KEY = "s2s.chat.panelOpen";
 
 export class ChatView {
   /**
@@ -31,10 +32,8 @@ export class ChatView {
     this._chatBtn = $("#chat-btn");
     /** @type {HTMLSpanElement} */
     this._chatBadge = $("#chat-badge");
-    /** @type {HTMLDivElement} */
+    /** @type {HTMLElement} */
     this._chatPanel = $("#chat-panel");
-    /** @type {HTMLDivElement} */
-    this._chatPanelBackdrop = $("#chat-panel-backdrop");
     /** @type {HTMLButtonElement} */
     this._chatPanelClose = $("#chat-panel-close");
     /** @type {HTMLDivElement} */
@@ -82,24 +81,39 @@ export class ChatView {
 
     this._chatBtn.addEventListener("click", () => (this._panelOpen ? this._closePanel() : this._openPanel()));
     this._chatPanelClose.addEventListener("click", () => this._closePanel());
-    this._chatPanelBackdrop.addEventListener("click", () => this._closePanel());
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && this._panelOpen) this._closePanel();
-    });
+    // It is part of the page, so outside clicks and Escape in another control
+    // (e.g. Settings) never dismiss it. Only the panel's own buttons toggle it.
+    let open = true;
+    try { open = localStorage.getItem(PANEL_STORAGE_KEY) !== "false"; } catch {}
+    this._setPanelOpen(open);
   }
 
   // ── Panel ───────────────────────────────────────────────────────────────
 
   _openPanel() {
-    this._panelOpen = true;
-    this._chatPanel.classList.add("open");
-    this._chatBadge.classList.remove("visible");
-    this._scrollToBottom();
+    this._setPanelOpen(true);
   }
 
   _closePanel() {
-    this._panelOpen = false;
-    this._chatPanel.classList.remove("open");
+    this._chatBtn.focus();
+    this._setPanelOpen(false);
+  }
+
+  /** @param {boolean} open */
+  _setPanelOpen(open) {
+    this._panelOpen = open;
+    this._chatPanel.hidden = !open;
+    this._chatPanel.classList.toggle("open", open);
+    document.body.classList.toggle("chat-panel-collapsed", !open);
+    this._chatBtn.setAttribute("aria-expanded", String(open));
+    const label = open ? "Hide conversation" : "Show conversation";
+    this._chatBtn.setAttribute("aria-label", label);
+    this._chatBtn.title = label;
+    try { localStorage.setItem(PANEL_STORAGE_KEY, String(open)); } catch {}
+    if (open) {
+      this._chatBadge.classList.remove("visible");
+      this._scrollToBottom();
+    }
   }
 
   // Coalesce scroll-to-bottom: a burst of cumulative transcript deltas would

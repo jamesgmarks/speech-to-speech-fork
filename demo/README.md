@@ -24,9 +24,14 @@ Both choices run one `RealtimeSession` adapter over the pinned official
 queue, audio, visualization, device, camera, and metering behavior out of the
 protocol implementation.
 
-## Response timings
+## Conversation and response timings
 
-Open Conversation and expand **Server timings** beneath a response to inspect
+Conversation is visible by default alongside the voice controls, or below
+them on smaller screens. Use its close button or the conversation toolbar
+button to hide/show it; this preference persists across reloads. It stays open
+while you interact elsewhere, including when dismissing Settings with Escape.
+
+Expand **Server timings** beneath a response to inspect
 E2E (estimated speech end to first generated audio), VAD end decision, Smart Turn
 decision, transcription, response generation, voice synthesis to first audio,
 and hold time before response. E2E is visible in the collapsed summary.

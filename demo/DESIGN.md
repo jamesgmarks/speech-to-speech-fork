@@ -127,10 +127,11 @@ the CDN is blocked.
 - **Radii:** `--radius-sm: 8px` (buttons, inputs, chips), `--radius-md: 14px`
   (bubbles, message bodies, modal), `--radius-lg: 22px` (reserved). Pick by element
   size; don't invent new values.
-- **Two reading surfaces for the transcript:** ephemeral bubbles top-right (desktop
-  only) that log and fade, and a slide-in history panel for review. On phones the
-  bubble stream is dropped and the panel goes full-screen — the panel is the single
-  source of truth there.
+- **Conversation stays in the layout.** Its history panel opens by default in a
+  desktop column, stacking below the voice controls on smaller screens. It never
+  blurs or blocks the rest of the app. Only its own toggle/close buttons hide it,
+  and the choice persists across reloads. Ephemeral bubbles appear top-right on
+  desktop only while history is hidden; phones use the panel for the transcript.
 
 ---
 

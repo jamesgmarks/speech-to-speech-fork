@@ -61,6 +61,8 @@ body {
 }
 
 body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 28vw, 400px);
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: radial-gradient(ellipse at 50% 20%, #1a1c28 0%, var(--bg) 60%);
   color: var(--text);
@@ -83,9 +85,16 @@ a:hover {
 }
 
 #app {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
   display: grid;
   grid-template-rows: auto 1fr auto;
   min-height: 100vh;
+}
+
+body.chat-panel-collapsed {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .hidden {
@@ -104,8 +113,6 @@ a:hover {
   align-items: flex-start;
   justify-content: space-between;
   padding: 18px 28px;
-  /* Default stacking (below the conversation panel, z 200) so the panel drawer
-   * covers the controls when it's open. */
 }
 
 .brand {
@@ -1689,6 +1696,12 @@ body.cam-on .footer {
   z-index: 100;
 }
 
+/* The transcript is already visible in the open panel. Keep temporary
+ * bubbles only when it is tucked away, so they cannot cover panel controls. */
+body:not(.chat-panel-collapsed) .bubble-stack {
+  display: none;
+}
+
 .bubble {
   --bubble-dx: 10px;
   pointer-events: auto;
@@ -1804,41 +1817,23 @@ body.cam-on .footer {
 /* ─── Conversation history panel ─────────────────────────────────────── */
 
 .chat-panel {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  pointer-events: none;
+  grid-column: 2;
+  grid-row: 1;
+  position: sticky;
+  top: 0;
+  height: 100dvh;
+  min-width: 0;
+  overflow: hidden;
 }
-.chat-panel-backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(8, 9, 13, 0.45);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  opacity: 0;
-  transition: opacity 0.25s ease;
-}
-.chat-panel.open .chat-panel-backdrop {
-  opacity: 1;
-  pointer-events: auto;
+.chat-panel[hidden] {
+  display: none;
 }
 .chat-panel-inner {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(360px, 90vw);
+  height: 100%;
   background: var(--bg-elev);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transform: translateX(100%);
-  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
-  pointer-events: auto;
-  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.35);
-}
-.chat-panel.open .chat-panel-inner {
-  transform: translateX(0);
 }
 .chat-panel-header {
   display: flex;
@@ -1855,6 +1850,7 @@ body.cam-on .footer {
   letter-spacing: 0.01em;
 }
 .chat-history {
+  min-height: 0;
   flex: 1;
   overflow-y: auto;
   padding: 16px 20px;
@@ -1862,6 +1858,35 @@ body.cam-on .footer {
   flex-direction: column;
   gap: 10px;
   scroll-behavior: smooth;
+}
+
+@media (max-width: 900px) {
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(420px, 1fr) minmax(240px, 42dvh);
+    height: 100dvh;
+  }
+  body.chat-panel-collapsed {
+    grid-template-rows: minmax(0, 1fr);
+  }
+  #app { min-height: 0; }
+  .chat-panel {
+    grid-column: 1;
+    grid-row: 2;
+    position: static;
+    height: 100%;
+  }
+  .chat-panel-inner {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  body:not(.chat-panel-collapsed) .circle {
+    width: clamp(110px, min(38vw, 20dvh), 180px);
+  }
+  body:not(.chat-panel-collapsed) .stage {
+    padding: 8px 12px 12px;
+    gap: 10px;
+  }
 }
 .chat-history::-webkit-scrollbar { width: 3px; }
 .chat-history::-webkit-scrollbar-track { background: transparent; }
@@ -2086,13 +2111,8 @@ body.cam-on .footer {
   }
   .mic-gate-arc { width: 70px; height: 70px; }
 
-  /* Full-screen conversation on phones — feels more deliberate than a
-   * narrow slide-over. It already spans top-to-bottom (inset 0); make it
-   * span edge-to-edge too and drop the now-pointless border/shadow. */
-  .chat-panel-inner {
-    width: 100vw;
-    border-left: none;
-    box-shadow: none;
+  body:not(.chat-panel-collapsed) {
+    grid-template-rows: minmax(360px, 1fr) minmax(240px, 42dvh);
   }
 }
 
