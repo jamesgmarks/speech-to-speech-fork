@@ -62,6 +62,60 @@ from .realtime_contract import (
 # ---------------------------------------------------------------------------
 
 
+def test_shared_conversation_can_be_read_without_voice_and_resets_only_explicitly(setup, tmp_path):
+    _, service, input_queue, output_queue, text_output_queue, should_listen, stop_event, playing, scope = setup
+    from speech_to_speech.LLM.chat import make_user_message
+
+    unit = PipelineUnit(
+        index=0,
+        service=service,
+        cancel_scope=scope,
+        should_listen=should_listen,
+        response_playing=playing,
+        input_queue=input_queue,
+        output_queue=output_queue,
+        text_output_queue=text_output_queue,
+        text_prompt_queue=Queue(),
+        handlers=[],
+    )
+    app = create_app([unit], stop_event, conversation_store_dir=str(tmp_path))
+    with TestClient(app) as client:
+        first = client.get("/v1/conversation").json()
+        conn = service.register(first["key"])
+        service._state(conn).runtime_config.chat.add_item(make_user_message("Seen from both browser origins."))
+        local = client.get("/v1/conversation", headers={"Host": "localhost"}).json()
+        remote = client.get("/v1/conversation", headers={"Host": "voice.example.com"}).json()
+        assert local == remote and local["key"] == first["key"]
+        assert local["history"] == [{"role": "user", "text": "Seen from both browser origins."}]
+        assert client.post("/v1/conversation/new", params={"expected_key": first["key"]}).status_code == 409
+        assert (
+            client.post(
+                "/v1/conversation/new",
+                params={"expected_key": first["key"]},
+                headers={"Origin": "https://other.example"},
+            ).status_code
+            == 403
+        )
+        # An immediate explicit reset waits for the caller's closing slot,
+        # rather than mistaking SESSION_END drain time for another live tab.
+        unit.session = router_module.SessionState(session_id=conn, released_at=time.monotonic())
+
+        def finish_disconnect():
+            time.sleep(0.08)
+            service.unregister(conn)
+            unit.session = None
+
+        release = Thread(target=finish_disconnect)
+        release.start()
+        fresh = client.post("/v1/conversation/new", params={"expected_key": first["key"]}).json()
+        release.join()
+        assert fresh["key"] != first["key"] and fresh["history"] == []
+        assert client.post("/v1/conversation/new", params={"expected_key": first["key"]}).status_code == 409
+    restarted = create_app([unit], stop_event, conversation_store_dir=str(tmp_path))
+    with TestClient(restarted) as client:
+        assert client.get("/v1/conversation").json() == fresh
+
+
 def test_voice_catalog_and_negotiated_discovery(setup, monkeypatch):
     app, *_ = setup
     catalog = {"voices": [{"id": "custom:james", "name": "James", "kind": "custom"}], "default": "custom:james"}

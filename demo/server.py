@@ -81,6 +81,7 @@ SPEECH_TO_SPEECH_URL = os.environ.get("SPEECH_TO_SPEECH_URL", "").strip()
 # proxies continue to use the private backend above.
 SPEECH_TO_SPEECH_PUBLIC_URL = os.environ.get("SPEECH_TO_SPEECH_PUBLIC_URL", "").strip()
 RTC_ENABLED = os.environ.get("SPEECH_TO_SPEECH_RTC", "true").lower() not in {"0", "false", "no"}
+SHARED_CONVERSATION = os.environ.get("SPEECH_TO_SPEECH_SHARED_CONVERSATION", "false").lower() in {"1", "true", "yes"}
 CLIENT_TOOLS_ENABLED = os.environ.get("SPEECH_TO_SPEECH_CLIENT_TOOLS", "true").lower() not in {"0", "false", "no"}
 if SPEECH_TO_SPEECH_URL:
     LOAD_BALANCER_URL = ""
@@ -223,10 +224,53 @@ def config():
         # the env-pinned URL (never a client-supplied one), so the toggle is
         # offered exactly when that URL exists.
         "rtc": bool(SPEECH_TO_SPEECH_URL) and RTC_ENABLED,
+        "sharedConversation": bool(SPEECH_TO_SPEECH_URL) and SHARED_CONVERSATION,
         "iceServers": RTC_ICE_SERVERS,
         "startupGreeting": STARTUP_GREETING,
         "auth": AUTH_ENABLED,
     }
+
+
+async def _conversation_proxy(method: str, expected_key: str | None = None):
+    if not SHARED_CONVERSATION or not SPEECH_TO_SPEECH_URL:
+        raise HTTPException(status_code=409, detail="A shared conversation is not configured for this deployment.")
+    parts = urlsplit(_webrtc_calls_url(SPEECH_TO_SPEECH_URL))
+    path = parts.path.removesuffix("/realtime/calls") + "/conversation"
+    query = parts.query
+    if method == "POST":
+        try:
+            key = str(UUID(expected_key or ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="A valid current conversation key is required.") from exc
+        path += "/new"
+        query = urlencode([*parse_qsl(query), ("expected_key", key)])
+    url = urlunsplit((parts.scheme, parts.netloc, path, query, ""))
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            response = await http.request(method, url)
+        if not response.is_success:
+            raise HTTPException(
+                status_code=response.status_code, detail=response.json().get("detail", "Conversation unavailable.")
+            )
+        return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="The ongoing conversation is unavailable. Try again when the speech service is ready.",
+        ) from exc
+
+
+@app.get("/api/conversation")
+async def current_conversation():
+    return await _conversation_proxy("GET")
+
+
+@app.post("/api/conversation/new")
+async def new_conversation(request: Request, expected_key: str):
+    origin = request.headers.get("origin")
+    if origin and (urlsplit(origin).scheme, urlsplit(origin).netloc) != (request.url.scheme, request.url.netloc):
+        raise HTTPException(status_code=403, detail="Conversation resets require a same-origin request.")
+    return await _conversation_proxy("POST", expected_key)
 
 
 @app.get("/api/voices")

@@ -124,6 +124,7 @@ Start a separate demo instance without disturbing the local UI or running agents
 export SPEECH_TO_SPEECH_URL=ws://127.0.0.1:8765/v1/realtime
 export SPEECH_TO_SPEECH_PUBLIC_URL=wss://voice.example.com/v1/realtime
 export SPEECH_TO_SPEECH_RTC=false
+export SPEECH_TO_SPEECH_SHARED_CONVERSATION=true
 export SPEECH_TO_SPEECH_CLIENT_TOOLS=false # SDK-backed deployment; native agent tools remain enabled
 uv run uvicorn --app-dir demo server:app --host 127.0.0.1 --port 7861
 ```
@@ -132,6 +133,18 @@ The public URL is advertised to the browser only; voice catalogs, session lists,
 and permission controls still use the private `SPEECH_TO_SPEECH_URL`. Disable
 WebRTC for this deployment because the HTTP tunnel carries WebSockets but does
 not carry the direct peer connection's UDP media.
+
+`SPEECH_TO_SPEECH_SHARED_CONVERSATION=true` makes this a personal deployment with
+one server-owned ongoing conversation. Enable it on the localhost frontend too:
+both addresses and new browsers then load the same transcript before microphone
+startup. On first use the server adopts its most recently saved conversation.
+The durable `current.json` pointer stays fixed across reconnects and service or
+machine restarts. **Settings → Start a new conversation** rotates it deliberately
+for all browsers; changing the backing LLM clears its context and transcript.
+Only one browser can attach its microphone to a conversation at a time. Idle
+pages refresh the shared transcript without occupying a speech slot. This mode
+is opt-in because all visitors to that deployment share the same conversation;
+keep it protected with the personal Access policy above.
 
 Use the example [tunnel configuration](cloudflared.example.yml), substituting
 your tunnel ID, credentials path, hostname, Access team name, and application AUD

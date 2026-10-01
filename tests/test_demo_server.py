@@ -640,3 +640,50 @@ async def test_tunnel_public_url_does_not_change_private_api_target(monkeypatch)
     assert requested == ["http://127.0.0.1:8765/v1/voices"]
     monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "")
     assert demo_server.config()["s2sUrl"] == ""
+
+
+async def test_shared_conversation_proxy_is_private_and_validates_explicit_resets(monkeypatch):
+    key = "88edaf87-91f2-4fc3-a153-7b5355fdd7d5"
+    calls = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def request(self, method, url):
+            calls.append((method, url))
+            return httpx.Response(200, json={"key": key}, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(demo_server, "SHARED_CONVERSATION", True)
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "ws://127.0.0.1:8765/v1/realtime")
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_PUBLIC_URL", "wss://voice.example.com/v1/realtime")
+    assert demo_server.config()["sharedConversation"]
+    assert await demo_server.current_conversation() == {"key": key}
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "https",
+            "server": ("voice.example.com", 443),
+            "path": "/api/conversation/new",
+            "headers": [(b"host", b"voice.example.com"), (b"origin", b"https://voice.example.com")],
+        }
+    )
+    await demo_server.new_conversation(request, key)
+    assert calls == [
+        ("GET", "http://127.0.0.1:8765/v1/conversation"),
+        ("POST", f"http://127.0.0.1:8765/v1/conversation/new?expected_key={key}"),
+    ]
+    with pytest.raises(demo_server.HTTPException) as exc:
+        await demo_server.new_conversation(request, "../../escape")
+    assert exc.value.status_code == 400
+    monkeypatch.setattr(demo_server, "SHARED_CONVERSATION", False)
+    with pytest.raises(demo_server.HTTPException) as exc:
+        await demo_server.current_conversation()
+    assert exc.value.status_code == 409

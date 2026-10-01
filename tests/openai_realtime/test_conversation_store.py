@@ -1,3 +1,4 @@
+import json
 from uuid import uuid4
 
 import pytest
@@ -103,3 +104,61 @@ def test_unfinished_generation_is_excluded_until_committed():
     assert len(chat.buffer) == 2
     chat.finalize_provisional_generation("response_1")
     assert len(chat.persistent_snapshot()) == 2
+
+
+def test_current_conversation_adopts_existing_context_and_survives_new_browsers_and_server(tmp_path):
+    key = str(uuid4())
+    service, conn, chat = connect(tmp_path, key)
+    chat.add_item(make_user_message("An ongoing conversation across browser origins."))
+    service.unregister(conn)
+    store = ConversationStore(str(tmp_path))
+    info = store.current("claude-agent-sdk", 30)
+    assert info["key"] == key
+    assert info["history"] == [{"role": "user", "text": "An ongoing conversation across browser origins."}]
+    assert ConversationStore(str(tmp_path)).current("claude-agent-sdk", 30) == info
+    # An unrelated old client saving a newer file cannot move the pointer.
+    other = Chat(30)
+    other.add_item(make_user_message("A different browser's old conversation."))
+    store.save(str(uuid4()), "claude-agent-sdk", other)
+    assert store.current("claude-agent-sdk", 30)["key"] == key
+
+
+def test_shared_reset_is_explicit_and_stale_browsers_cannot_reset_it_again(tmp_path):
+    store = ConversationStore(str(tmp_path))
+    info = store.current("claude-agent-sdk", 30)
+    chat, _, _ = store.acquire(info["key"], "claude-agent-sdk", 30)
+    chat.add_item(make_user_message("Keep this until a deliberate reset."))
+    store.save(info["key"], "claude-agent-sdk", chat)
+    with pytest.raises(ValueError, match="Disconnect"):
+        store.start_new(info["key"], "claude-agent-sdk", 30)
+    store.release(info["key"])
+    fresh = store.start_new(info["key"], "claude-agent-sdk", 30)
+    assert fresh["key"] != info["key"] and fresh["history"] == []
+    with pytest.raises(ValueError, match="changed in another browser"):
+        store.start_new(info["key"], "claude-agent-sdk", 30)
+    assert ConversationStore(str(tmp_path)).current("claude-agent-sdk", 30) == fresh
+
+
+def test_shared_backend_switch_clears_context_and_transcript_without_resurrecting_old_history(tmp_path):
+    store = ConversationStore(str(tmp_path))
+    info = store.current("claude-agent-sdk", 30)
+    chat = Chat(30)
+    chat.add_item(make_user_message("Claude context."))
+    store.save(info["key"], "claude-agent-sdk", chat)
+    switched = store.current("responses-api", 30)
+    assert switched["key"] == info["key"] and switched["reset"] and switched["history"] == []
+    assert store.current("claude-agent-sdk", 30)["history"] == []
+
+
+def test_readable_transcript_survives_model_context_eviction_and_service_restart(tmp_path):
+    store = ConversationStore(str(tmp_path))
+    key = store.current("claude-agent-sdk", 1)["key"]
+    chat = Chat(1)
+    for text in ["First turn", "Second turn", "Third turn"]:
+        chat.add_item(make_user_message(text))
+        store.save(key, "claude-agent-sdk", chat)
+    info = ConversationStore(str(tmp_path)).current("claude-agent-sdk", 1)
+    assert [row["text"] for row in info["history"]] == ["First turn", "Second turn", "Third turn"]
+    saved = json.loads((tmp_path / f"{key}.json").read_text())
+    assert len(saved["items"]) < len(info["history"])
+    assert (tmp_path / "current.json").stat().st_mode & 0o777 == 0o600

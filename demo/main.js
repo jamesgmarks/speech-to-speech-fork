@@ -324,6 +324,7 @@ let allowDirect = true;
 // Deploy-pinned s2s URL (SPEECH_TO_SPEECH_URL). Non-empty -> locked direct
 // mode: the field displays it read-only and the saved user URL is untouched.
 let pinnedUrl = "";
+let sharedConversation = false;
 // Whether the deploy offers the WebRTC transport (/api/config `rtc`; true
 // exactly when the URL is env-pinned, since /api/calls only forwards there).
 let rtcAvailable = false;
@@ -932,6 +933,7 @@ async function fetchConfig() {
       allowDirect = json.allowDirect ?? !lbMode;
       // Deploy-pinned direct URL (overrides the LB server-side already).
       pinnedUrl = (json.s2sUrl || "").trim();
+      sharedConversation = json.sharedConversation === true;
       // WebRTC transport: offered only when the deploy pins the URL (the
       // /api/calls proxy refuses to forward anywhere else).
       rtcAvailable = !!json.rtc;
@@ -951,6 +953,10 @@ async function fetchConfig() {
   void account.refresh();
   syncToolsUi();
   syncConnectionUi();
+  if (sharedConversation) {
+    try { await restoreSharedConversation(); }
+    catch (error) { setCaption(error.message, "error"); }
+  }
   if (pinnedUrl) {
     try {
       const res = await fetch("api/voices");
@@ -962,6 +968,19 @@ async function fetchConfig() {
       // Older backends keep the existing preset selector.
     }
   }
+}
+
+async function restoreSharedConversation(fresh = false, idleOnly = false) {
+  const path = fresh ? `api/conversation/new?expected_key=${encodeURIComponent(chat.conversationKey)}` : "api/conversation";
+  const response = await fetch(path, { method: fresh ? "POST" : "GET", cache: "no-store" });
+  if (!response.ok) {
+    let detail = "The ongoing conversation could not be loaded. Reconnect when the speech service is ready.";
+    try { detail = (await response.json()).detail || detail; } catch {}
+    throw new Error(detail);
+  }
+  const info = await response.json();
+  if (idleOnly && !["idle", "error"].includes(currentState)) return;
+  chat.adoptSharedConversation(info);
 }
 
 /**
@@ -1168,9 +1187,14 @@ async function startWithSettings(fresh = false) {
   const audioContext = createResumedAudioContext();
   try {
     if (client) await teardown();
-    if (fresh) chat.startNewConversation();
+    await configReady;
+    if (fresh) {
+      if (sharedConversation) await restoreSharedConversation(true);
+      else chat.startNewConversation();
+    }
     await doStart(audioContext);
   } catch (err) {
+    void audioContext.close().catch(() => {});
     await handleStartError(err);
   }
 }
@@ -1425,6 +1449,10 @@ async function doStart(audioContext = null) {
   if (!audioContext) audioContext = createResumedAudioContext();
   setState("connecting");
   await configReady;
+  if (sharedConversation) {
+    try { await restoreSharedConversation(); }
+    catch (error) { void audioContext.close().catch(() => {}); throw error; }
+  }
   const transport = effectiveTransport();
   // Resolve the target before requesting the mic so a misconfiguration (e.g.
   // direct mode with no URL) fails fast with a clear message. Over WebRTC the
@@ -1766,6 +1794,17 @@ async function onFatalError(err) {
 setState("idle");
 initGateArc();
 const configReady = fetchConfig();
+// An idle page can follow work done through another browser/origin without
+// taking a voice slot or touching an active call's transcript/audio controls.
+let conversationRefreshPending = false;
+async function refreshIdleConversation() {
+  if (!sharedConversation || document.hidden || conversationRefreshPending || !["idle", "error"].includes(currentState)) return;
+  conversationRefreshPending = true;
+  try { await restoreSharedConversation(false, true); } catch {}
+  finally { conversationRefreshPending = false; }
+}
+window.addEventListener("focus", () => void refreshIdleConversation());
+setInterval(() => void refreshIdleConversation(), 5000);
 void configReady.then(() => autoStartCamera());
 // Start the webcam as soon as the user lands (camera tool defaults on), and
 // react to later permission changes (re-grant after a denial re-enables it).

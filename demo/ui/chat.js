@@ -138,6 +138,27 @@ export class ChatView {
   }
 
   /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string}>}} info */
+  adoptSharedConversation(info) {
+    if (!info || typeof info.key !== "string" || !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(info.key)
+        || typeof info.backend !== "string" || !Array.isArray(info.history)) {
+      throw new Error("The speech service returned an invalid conversation.");
+    }
+    const shown = Array.from(this._chatHistory.querySelectorAll(".hist-msg.user, .hist-msg.assistant"))
+      .map(el => ({ role: el.classList.contains("user") ? "user" : "assistant", text: el.querySelector(".hist-body")?.textContent || "" }))
+      .filter(row => row.text);
+    if (info.key === this.conversationKey && info.backend === this.conversationBackend && !info.reset
+        && JSON.stringify(shown) === JSON.stringify(info.history)) return;
+    this.reset({ dismiss: true });
+    this.clear();
+    this.conversationKey = info.key;
+    this.conversationBackend = info.backend;
+    const url = new URL(location.href);
+    url.searchParams.delete("conversation");
+    history.replaceState(history.state, "", url.href);
+    this.onConversationRestored(info);
+  }
+
+  /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string}>}} info */
   onConversationRestored(info) {
     if (info.key !== this.conversationKey || typeof info.backend !== "string") return;
     if (info.reset || (this.conversationBackend && this.conversationBackend !== info.backend)) {

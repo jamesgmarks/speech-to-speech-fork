@@ -600,6 +600,48 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan)
 
+    @app.get("/v1/conversation")
+    async def current_conversation() -> dict[str, Any]:
+        if store is None:
+            raise HTTPException(status_code=409, detail="Conversation persistence is not enabled.")
+        service = pool[0].service
+        try:
+            for unit in pool:
+                for conn_id in list(unit.service._conns):
+                    unit.service.checkpoint(conn_id)
+            return store.current(service.llm_backend, service._chat_size)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/conversation/new")
+    async def new_conversation(request: Request, expected_key: str) -> dict[str, Any]:
+        origin = request.headers.get("origin")
+        if origin and (urlsplit(origin).scheme, urlsplit(origin).netloc) != (request.url.scheme, request.url.netloc):
+            raise HTTPException(status_code=403, detail="Conversation resets require a same-origin request.")
+        if store is None:
+            raise HTTPException(status_code=409, detail="Conversation persistence is not enabled.")
+        service = pool[0].service
+        # close() can finish in the browser before SESSION_END drains. Wait
+        # only for this already-closing attachment, never for another active
+        # browser, so a deliberate fresh start works immediately after Stop.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            closing = False
+            for unit in pool:
+                attachment = unit.session
+                if attachment is None or attachment.released_at is None or attachment.quarantined_at is not None:
+                    continue
+                state = unit.service._conns.get(attachment.session_id)
+                if state is not None and state.conversation_key == expected_key:
+                    closing = True
+            if not closing:
+                break
+            await asyncio.sleep(0.05)
+        try:
+            return store.start_new(expected_key, service.llm_backend, service._chat_size)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     session_handler = next(
         (
             h
