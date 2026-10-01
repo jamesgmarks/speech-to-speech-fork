@@ -83,6 +83,31 @@ class SessionHandler(RealtimeBaseHandler):
         # The SDK model has no `id` field but allows extras, and model_dump()
         # carries them onto the wire.
         session = cfg.session.model_copy(update={"id": conn_id})
+        state = self._state(conn_id)
+        if state.conversation_key is not None:
+            history = []
+            for message in cfg.chat.to_transformers_chat():
+                if message.get("role") not in ("user", "assistant"):
+                    continue
+                content = message.get("content")
+                text = (
+                    content
+                    if isinstance(content, str)
+                    else "\n".join(part.get("text", "") for part in (content or []) if isinstance(part, dict))
+                )
+                if text:
+                    history.append({"role": message["role"], "text": text})
+            session = session.model_copy(
+                update={
+                    "speech_to_speech_conversation": {
+                        "key": state.conversation_key,
+                        "backend": self._service.llm_backend,
+                        "resumed": state.conversation_resumed,
+                        "reset": state.conversation_reset,
+                        "history": history,
+                    }
+                }
+            )
         return SessionCreatedEvent(
             type="session.created",
             event_id=self._next_event_id(),

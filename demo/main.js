@@ -1435,7 +1435,6 @@ async function doStart(audioContext = null) {
   // feature; over WebRTC only the mute button remains.
   document.body.classList.toggle("rtc-live", transport === "webrtc");
 
-  chat.clear();
   chat.reset();
   setState("connecting");
   setCaption("Asking for mic…", "muted");
@@ -1455,6 +1454,8 @@ async function doStart(audioContext = null) {
   // a still-pending grant just means the snapshot tool isn't ready yet.
 
   const common = {
+    conversationKey: chat.conversationKey,
+    conversationBackend: chat.conversationBackend,
     voice: settings.voice,
     instructions: settings.instructions,
     startupGreeting,
@@ -1560,6 +1561,9 @@ async function doStart(audioContext = null) {
     const detail = /** @type {CustomEvent<{ error: unknown }>} */ (e).detail;
     const msg = detail.error instanceof Error ? detail.error.message : String(detail.error);
     console.warn("[main] server error (non-fatal):", msg);
+  });
+  c.addEventListener("conversation-restored", (e) => {
+    chat.onConversationRestored(/** @type {CustomEvent} */ (e).detail);
   });
   c.addEventListener("session", (e) => {
     const info = /** @type {CustomEvent<{ info: import("./s2s-realtime-client.js").SessionInfo }>} */ (e).detail.info;
@@ -1746,7 +1750,6 @@ async function onFatalError(err) {
 }
 
 setState("idle");
-chat.renderEmptyState();
 initGateArc();
 const configReady = fetchConfig();
 void configReady.then(() => autoStartCamera());

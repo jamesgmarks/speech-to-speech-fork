@@ -52,7 +52,14 @@ class RealtimeSession {
     sessions.push(this);
   }
   on(name, callback) { this.listeners.set(name, callback); }
-  async connect(options) { this.connectOptions = options; }
+  async connect(options) {
+    this.connectOptions = options;
+    if (options.url.includes("conversation_key=")) {
+      this.options.transport.listeners.get("*")({ type: "session.created", session: {
+        speech_to_speech_conversation: { key: "88edaf87-91f2-4fc3-a153-7b5355fdd7d5", backend: "claude-agent-sdk", resumed: true, reset: false },
+      } });
+    }
+  }
   sendMessage(message) { this.messages.push(message); }
   mute() {}
   close() {}
@@ -100,6 +107,27 @@ for (const [transport, url] of [
     throw new Error("WebRTC did not use the stock SDK transport");
   }
 }
+for (const transport of ["websocket", "webrtc"]) {
+  const client = new S2sRealtimeClient({
+    transport,
+    directUrl: "ws://example.test/v1/realtime?token=keep",
+    callsUrl: "api/calls?token=keep",
+    conversationKey: "88edaf87-91f2-4fc3-a153-7b5355fdd7d5",
+    conversationBackend: "claude-agent-sdk",
+    startupGreeting: "Do not repeat me.", micStream,
+  });
+  client._setupAudio = async () => {};
+  client._attachRtcOutput = () => {};
+  let restored;
+  client.addEventListener("conversation-restored", event => { restored = event.detail; });
+  await client.connect();
+  const session = sessions.at(-1);
+  const query = new URL(session.connectOptions.url).searchParams;
+  if (query.get("conversation_key") !== client.options.conversationKey || query.get("token") !== "keep") throw new Error("conversation identity or existing query lost");
+  if (query.get("conversation_backend") !== "claude-agent-sdk") throw new Error("backend hint lost");
+  if (!restored?.resumed || session.messages.length) throw new Error("resumed conversation greeted again");
+}
+
 """
     )
 

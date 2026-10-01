@@ -37,7 +37,7 @@ from openai.types.responses.response_input_param import (
 )
 from openai.types.responses.response_input_text_param import ResponseInputTextParam
 from openai.types.responses.response_output_text_param import ResponseOutputTextParam
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from speech_to_speech.utils.utils import _generate_id
 
@@ -867,6 +867,25 @@ class Chat:
             item_ids, call_ids = tracked
             clone._rollback_generation_locked(None, item_ids=item_ids, call_ids=call_ids)
         return clone
+
+    def persistent_snapshot(self) -> list[dict[str, Any]]:
+        """Capture committed context, excluding reversible output and unfinished tools."""
+        with self._lock:
+            clone = Chat(self.size)
+            clone.buffer, clone._ordered_pending_call_ids = deepcopy((self.buffer, self._ordered_pending_call_ids))
+            for item_ids, call_ids in self._provisional_generations.values():
+                clone._rollback_generation_locked(None, item_ids=item_ids, call_ids=call_ids)
+            items = clone._drop_unpaired_ordered_turns_locked(clone._with_adjacent_tool_outputs(clone.buffer))
+            return [item.model_dump(mode="json", exclude_none=True) for item in items]
+
+    @classmethod
+    def from_persistent_snapshot(cls, items: list[dict[str, Any]], size: int) -> Chat:
+        """Restore validated context with the current backend's context limit."""
+        chat = cls(size)
+        adapter: TypeAdapter[SupportedItem] = TypeAdapter(SupportedItem)
+        for raw in items:
+            add_supported_item(chat, adapter.validate_python(raw))
+        return chat
 
     def reset(self) -> None:
         """Clear all conversation state. Cancels any in-flight compaction splice."""

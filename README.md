@@ -709,6 +709,20 @@ originating response finishes. Worker timeout or failure is also reported.
 Jobs are scoped to the connected call; disconnecting the call stops its clients
 and jobs, so they are not persisted across reconnects or application restarts.
 
+The demo keeps its transcript and conversation identity in browser local storage.
+`serve` saves that conversation's committed LLM context atomically in
+`~/.speech-to-speech/conversations` (override with `--conversation_store_dir`).
+Changing voices, instructions, transport, reconnecting, reloading the page, or
+restarting the service resumes the conversation without another startup greeting.
+Changing the LLM backend clears both history and context; changing a model within
+the same backend does not. Normal context trimming and compaction still apply.
+Audio playback blobs and pending permissions are not stored across page reloads.
+Clients can opt in with a UUID `conversation_key` query parameter on the WebSocket
+or WebRTC calls URL, plus `conversation_backend` with the last acknowledged backend
+to detect a switch between separately hosted services. A conversation accepts one
+connected client at a time. Library `create_app` callers must explicitly supply
+`conversation_store_dir` to enable durable storage; unkeyed clients remain isolated.
+
 By default Claude receives a voice-orchestrator prompt that favors starting
 substantial investigations and implementation with `Agent(run_in_background=true)`
 and acknowledging briefly, keeping the voice loop free for conversation. The

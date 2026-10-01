@@ -542,12 +542,30 @@ def create_app(
     pool: list[PipelineUnit],
     stop_event: ThreadingEvent,
     llm_proxy_config: LLMProxyConfig | None = None,
+    conversation_store_dir: str | None = None,
 ) -> FastAPI:
+    from speech_to_speech.api.openai_realtime.conversation_store import ConversationStore
+
+    store = ConversationStore(conversation_store_dir) if conversation_store_dir else None
+    for unit in pool:
+        unit.service.conversation_store = store
+
+    async def checkpoint_loop() -> None:
+        while True:
+            await asyncio.sleep(1)
+            for unit in pool:
+                for conn_id in list(unit.service._conns):
+                    try:
+                        unit.service.checkpoint(conn_id)
+                    except Exception:
+                        logger.exception("Could not checkpoint conversation %s", conn_id)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # One send loop per pipeline unit; each polls its own queues and forwards
         # to the websocket currently attached via unit.session.
         send_tasks = [asyncio.create_task(_send_loop_for(unit)) for unit in pool]
+        send_tasks.append(asyncio.create_task(checkpoint_loop()))
         yield
         for task in send_tasks:
             task.cancel()
@@ -557,6 +575,8 @@ def create_app(
             except asyncio.CancelledError:
                 pass
         for unit in pool:
+            for conn_id in list(unit.service._conns):
+                unit.service.checkpoint(conn_id)
             sess = unit.session
             if sess is not None and sess.transport is not None:
                 try:
@@ -629,7 +649,9 @@ def create_app(
         # releases the unit, even if session setup fails.
         session_id = ""
         try:
-            session_id = unit.service.register()
+            session_id = unit.service.register(
+                ws.query_params.get("conversation_key"), ws.query_params.get("conversation_backend")
+            )
             unit.session.session_id = session_id
             logger.info(f"Client connected to pipeline {unit.index} (session {session_id})")
 
@@ -647,6 +669,9 @@ def create_app(
 
                 await _dispatch_client_event(unit, session_id, raw, transport)
 
+        except ValueError as exc:
+            await send_ws_event(ws, build_error_event(str(exc), error_type="conversation_restore_failed"))
+            await ws.close(code=1008, reason="Conversation could not be restored")
         except WebSocketDisconnect:
             logger.info(f"Client {session_id} disconnected from pipeline {unit.index}")
         except Exception as exc:
@@ -763,7 +788,9 @@ def create_app(
 
         pipeline_log_ctx.set(unit.index)
         try:
-            session_id = unit.service.register()
+            session_id = unit.service.register(
+                request.query_params.get("conversation_key"), request.query_params.get("conversation_backend")
+            )
             assert unit.session is not None
             unit.session.session_id = session_id
             logger.info(f"WebRTC client claiming pipeline {unit.index} (session {session_id})")

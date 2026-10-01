@@ -45,7 +45,8 @@ import asyncio
 import json
 import logging
 import os
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from uuid import UUID
 
 import auth
 import httpx
@@ -359,6 +360,20 @@ async def calls(request: Request):
 
     offer = await request.body()
     url = _webrtc_calls_url(SPEECH_TO_SPEECH_URL)
+    key = request.query_params.get("conversation_key")
+    if key is not None:
+        try:
+            if str(UUID(key)) != key:
+                raise ValueError("Noncanonical UUID")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid conversation_key.")
+        parts = urlsplit(url)
+        query = dict(parse_qsl(parts.query))
+        query["conversation_key"] = key
+        previous_backend = request.query_params.get("conversation_backend")
+        if previous_backend:
+            query["conversation_backend"] = previous_backend
+        url = urlunsplit(parts._replace(query=urlencode(query)))
     try:
         # Generous timeout: the s2s server waits for its own ICE gathering
         # (up to ~5 s) before returning the answer.

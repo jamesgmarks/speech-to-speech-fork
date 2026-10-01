@@ -3,6 +3,10 @@ from dataclasses import dataclass, field
 
 @dataclass
 class RealtimeServerArguments:
+    conversation_store_dir: str = field(
+        default="~/.speech-to-speech/conversations",
+        metadata={"help": "Directory for durable conversation context requested by reconnecting clients."},
+    )
     host: str = field(
         default="127.0.0.1",
         metadata={

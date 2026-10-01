@@ -35,6 +35,8 @@
  * @property {string} voice
  * @property {string} instructions
  * @property {string} [startupGreeting]
+ * @property {string} [conversationKey]
+ * @property {string} [conversationBackend]
  * @property {MediaStream} [micStream]
  * @property {() => Promise<MediaStream>} [acquireMic]
  * @property {AudioContext} [audioContext]
@@ -238,10 +240,29 @@ export class S2sRealtimeClient extends EventTarget {
       else this._clearPlayback();
     });
 
-    await this._session.connect({ apiKey: "s2s-local", url });
+    if (this.options.conversationKey) {
+      const target = new URL(url, globalThis.location?.href);
+      target.searchParams.set("conversation_key", this.options.conversationKey);
+      if (this.options.conversationBackend) target.searchParams.set("conversation_backend", this.options.conversationBackend);
+      url = target.href;
+    }
+    this._conversationResumed = false;
+    let restoreTimer;
+    const restored = this.options.conversationKey ? new Promise((resolve) => {
+      this._conversationReady = resolve;
+    }) : null;
+    try {
+      await this._session.connect({ apiKey: "s2s-local", url });
+      if (restored) await Promise.race([restored, new Promise((_, reject) => {
+        restoreTimer = setTimeout(() => reject(new Error("Conversation restore was not acknowledged")), 10000);
+      })]);
+    } finally {
+      clearTimeout(restoreTimer);
+      this._conversationReady = null;
+    }
     if (this.options.transport === "webrtc") this._attachRtcOutput();
     const greeting = this.options.startupGreeting?.trim();
-    if (greeting) {
+    if (greeting && !this._conversationResumed) {
       this._responseRequested = true;
       this._session.sendMessage(greeting);
     }
@@ -541,6 +562,15 @@ export class S2sRealtimeClient extends EventTarget {
     if (typeof type !== "string") return;
     if (this._debug) console.debug(`[${this.options.transport}]`, event);
     switch (type) {
+      case "session.created": {
+        const conversation = event.session?.speech_to_speech_conversation;
+        if (conversation) {
+          this._conversationResumed = conversation.resumed === true;
+          this.dispatchEvent(new CustomEvent("conversation-restored", { detail: conversation }));
+        }
+        this._conversationReady?.();
+        break;
+      }
       case "speech_to_speech.voices":
         this.dispatchEvent(new CustomEvent("voice-catalog", { detail: event }));
         break;

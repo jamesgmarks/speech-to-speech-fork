@@ -22,6 +22,7 @@ const WRENCH_PATH = `<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l
 const CHAT_BUBBLE_SVG = `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`;
 const EMPTY_STATE_HTML = `<div id="chat-empty" class="chat-empty">${CHAT_BUBBLE_SVG}<span class="chat-empty-title">No messages yet</span><span class="chat-empty-hint">Tap the orb and start talking</span></div>`;
 const PANEL_STORAGE_KEY = "s2s.chat.panelOpen";
+const CONVERSATION_STORAGE_KEY = "s2s.conversation";
 
 export class ChatView {
   /**
@@ -86,6 +87,58 @@ export class ChatView {
     let open = true;
     try { open = localStorage.getItem(PANEL_STORAGE_KEY) !== "false"; } catch {}
     this._setPanelOpen(open);
+    this.conversationKey = crypto.randomUUID();
+    this.conversationBackend = "";
+    const requestedKey = new URL(location.href).searchParams.get("conversation");
+    const resumeKey = requestedKey && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(requestedKey) ? requestedKey : "";
+    if (resumeKey) this.conversationKey = resumeKey;
+    try {
+      const saved = JSON.parse(localStorage.getItem(CONVERSATION_STORAGE_KEY) || "null");
+      if (saved && typeof saved.key === "string" && /^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(saved.key)
+          && (!resumeKey || saved.key === resumeKey)) {
+        this.conversationKey = saved.key;
+        this.conversationBackend = typeof saved.backend === "string" ? saved.backend : "";
+        for (const row of Array.isArray(saved.messages) ? saved.messages : []) {
+          if (["user", "assistant"].includes(row.role) && typeof row.text === "string") {
+            this._appendHistMsg(row.role, row.text, false);
+          }
+        }
+      }
+    } catch (error) { console.warn("Could not restore conversation display", error); }
+    if (!this._chatHistory.querySelector(".hist-msg")) this.renderEmptyState();
+    this._persistTimer = 0;
+    this._historyObserver = new MutationObserver(() => {
+      clearTimeout(this._persistTimer);
+      this._persistTimer = window.setTimeout(() => this._persistConversation(), 100);
+    });
+    this._historyObserver.observe(this._chatHistory, { childList: true, subtree: true, characterData: true });
+    window.addEventListener("pagehide", () => this._persistConversation());
+    this._persistConversation();
+  }
+
+  _persistConversation() {
+    const messages = Array.from(this._chatHistory.querySelectorAll(".hist-msg.user, .hist-msg.assistant"))
+      .map(el => ({ role: el.classList.contains("user") ? "user" : "assistant", text: el.querySelector(".hist-body")?.textContent || "" }))
+      .filter(row => row.text);
+    try {
+      localStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify({ key: this.conversationKey, backend: this.conversationBackend, messages }));
+    } catch (error) { console.warn("Could not save conversation display", error); }
+  }
+
+  /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string}>}} info */
+  onConversationRestored(info) {
+    if (info.key !== this.conversationKey || typeof info.backend !== "string") return;
+    if (info.reset || (this.conversationBackend && this.conversationBackend !== info.backend)) {
+      this.reset({ dismiss: true });
+      this.clear();
+    }
+    if (!this._chatHistory.querySelector(".hist-msg")) {
+      for (const row of info.history || []) {
+        if (["user", "assistant"].includes(row.role) && typeof row.text === "string") this._appendHistMsg(row.role, row.text, false);
+      }
+    }
+    this.conversationBackend = info.backend;
+    this._persistConversation();
   }
 
   // ── Panel ───────────────────────────────────────────────────────────────

@@ -9,11 +9,51 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from starlette.requests import Request
 
 DEMO_DIR = Path(__file__).resolve().parents[1] / "demo"
 sys.path.insert(0, str(DEMO_DIR))
 demo_auth = importlib.import_module("auth")
 demo_server = importlib.import_module("server")
+
+
+async def test_webrtc_proxy_preserves_conversation_without_accepting_a_target(monkeypatch):
+    requested = []
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, **kwargs):
+            requested.append(url)
+            return httpx.Response(201, content="answer", request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "wss://speech.example/v1/realtime?token=local")
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", FakeAsyncClient)
+    key = "88edaf87-91f2-4fc3-a153-7b5355fdd7d5"
+    request = Request(
+        {
+            "type": "http",
+            "query_string": f"conversation_key={key}&conversation_backend=claude-agent-sdk&url=http://untrusted".encode(),
+        }
+    )
+    request._body = b"offer"
+    assert (await demo_server.calls(request)).status_code == 201
+    assert requested == [
+        f"https://speech.example/v1/realtime/calls?token=local&conversation_key={key}&conversation_backend=claude-agent-sdk"
+    ]
+    bad = Request({"type": "http", "query_string": b"conversation_key=../../escape"})
+    bad._body = b"offer"
+    with pytest.raises(demo_server.HTTPException) as exc:
+        await demo_server.calls(bad)
+    assert exc.value.status_code == 400
+    assert len(requested) == 1
 
 
 def _mock_whoami(monkeypatch, payload):

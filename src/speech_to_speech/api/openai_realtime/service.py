@@ -53,6 +53,7 @@ from speech_to_speech.agent_interactions import (
     AgentPermissionResolved,
     AgentPermissionVoice,
 )
+from speech_to_speech.api.openai_realtime.conversation_store import ConversationStore
 from speech_to_speech.api.openai_realtime.handlers import (
     AudioHandler,
     ConversationHandler,
@@ -224,6 +225,9 @@ class ConnState(BaseModel):
 
     session_id: str = Field(default_factory=lambda: _generate_id("session"))
     conversation_id: str = Field(default_factory=lambda: _generate_id("conv"))
+    conversation_key: str | None = None
+    conversation_resumed: bool = False
+    conversation_reset: bool = False
     runtime_config: RuntimeConfig = Field(default_factory=RuntimeConfig)
     in_response: bool = False
     response_pending: bool = False
@@ -357,6 +361,7 @@ class RealtimeService:
         speculative_turns: SpeculativeTurnTracker | None = None,
         turn_latency_store: TurnLatencyStore | None = None,
         default_instructions: str | None = None,
+        llm_backend: str = "unknown",
     ) -> None:
         self.text_prompt_queue = text_prompt_queue
         self.should_listen = should_listen
@@ -366,6 +371,8 @@ class RealtimeService:
         if speculative_turns is not None:
             speculative_turns.wait_observer = self.turn_latency_store.record_smart_wait
         self._default_instructions = default_instructions
+        self.llm_backend = llm_backend
+        self.conversation_store: ConversationStore | None = None
         # None means the active backend does not declare a complete language set.
         self.stt_supported_languages: set[str] | None = None
         self.tts_supported_languages: set[str] | None = None
@@ -392,22 +399,38 @@ class RealtimeService:
 
     # ── Connection lifecycle ─────────────────────
 
-    def register(self) -> str:
+    def register(self, conversation_key: str | None = None, previous_backend: str | None = None) -> str:
         """Register a new connection and return its session_id."""
         if self.speculative_turns:
             self.speculative_turns.reset()
+        chat = Chat(self._chat_size)
+        resumed = reset = False
+        if conversation_key is not None:
+            if self.conversation_store is None:
+                raise ValueError("Conversation persistence is not enabled on this server.")
+            chat, resumed, reset = self.conversation_store.acquire(
+                conversation_key, self.llm_backend, self._chat_size, previous_backend
+            )
         state = ConnState(
+            conversation_key=conversation_key,
+            conversation_resumed=resumed,
+            conversation_reset=reset,
             runtime_config=RuntimeConfig(
-                chat=Chat(self._chat_size),
+                chat=chat,
                 session=RealtimeSessionCreateRequest(
                     type="realtime",
                     instructions=self._default_instructions,
                 ),
-            )
+            ),
         )
         self._conns[state.session_id] = state
         self.total_usage.connections += 1
         return state.session_id
+
+    def checkpoint(self, conn_id: str) -> None:
+        st = self._conns.get(conn_id)
+        if st is not None and st.conversation_key and self.conversation_store is not None:
+            self.conversation_store.save(st.conversation_key, self.llm_backend, st.runtime_config.chat)
 
     def unregister(self, conn_id: str) -> None:
         st = self._conns.pop(conn_id, None)
@@ -418,6 +441,11 @@ class RealtimeService:
             # billable LLM calls on its behalf once the splice is suppressed.
             st.runtime_config.agent_interactions.cancel_all()
             st.runtime_config.chat.close()
+            if st.conversation_key and self.conversation_store is not None:
+                try:
+                    self.conversation_store.save(st.conversation_key, self.llm_backend, st.runtime_config.chat)
+                finally:
+                    self.conversation_store.release(st.conversation_key)
             for input_tokens, output_tokens in st.pending_token_usage.values():
                 st.response_usage.input_tokens += input_tokens
                 st.response_usage.output_tokens += output_tokens
@@ -542,7 +570,9 @@ class RealtimeService:
         reason: _StatusReason | None = None,
         response_key: str | None = None,
     ) -> list[ServerEvent]:
-        return self.response.finish_response(conn_id, status, reason, response_key=response_key)
+        events = self.response.finish_response(conn_id, status, reason, response_key=response_key)
+        self.checkpoint(conn_id)
+        return events
 
     def close_pending_responses(self, conn_id: str) -> None:
         """Cancel queued responses without losing usage already reported by their LMs."""
@@ -579,6 +609,7 @@ class RealtimeService:
             self.response.discard_tool_followup_prefetch(conn_id)
         events = self.conversation.handle_conversation_item_create(conn_id, event)
         self.response.maybe_start_tool_followup_prefetch(conn_id)
+        self.checkpoint(conn_id)
         return events
 
     def handle_agent_permission_reply(self, conn_id: str, event: AgentPermissionReply) -> RealtimeErrorEvent | None:
@@ -671,6 +702,8 @@ class RealtimeService:
     def dispatch_pipeline_event(self, conn_id: str, event: PipelineEvent) -> list[ServerEvent]:
         """Route an internal pipeline event to the appropriate handler."""
         events = self._dispatch_pipeline_event(conn_id, event, wait_for_pending_reopen=True)
+        if isinstance(event, (TranscriptionCompletedEvent, ResponseGenerationDoneEvent)):
+            self.checkpoint(conn_id)
         return [] if events is None else events
 
     def try_dispatch_pipeline_event(self, conn_id: str, event: PipelineEvent) -> list[ServerEvent] | None:

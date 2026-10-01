@@ -528,6 +528,7 @@ def _build_pipeline_unit(
         speculative_turns=speculative_turns,
         turn_latency_store=turn_latency_store,
         default_instructions=default_instructions,
+        llm_backend=llm_selection.name,
     )
 
     if module_kwargs.enable_live_transcription and not stt_selection.spec.capabilities.streams_audio_chunks:
@@ -620,6 +621,7 @@ def build_pipeline(
         pool=pool,
         host=host or args.realtime_server_kwargs.host,
         port=args.realtime_server_kwargs.port,
+        conversation_store_dir=getattr(args.realtime_server_kwargs, "conversation_store_dir", None),
         llm_proxy_config=(
             build_llm_proxy_config(module_kwargs, args.llm_backend) if module_kwargs.enable_llm_proxy else None
         ),
