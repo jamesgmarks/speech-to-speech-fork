@@ -241,6 +241,23 @@ async def voices():
         raise HTTPException(status_code=502, detail="Voice choices unavailable. Try refreshing when the speech service is ready.") from exc
 
 
+@app.get("/api/agent-sessions")
+async def agent_sessions():
+    """Read inventory only from the deployment-pinned speech backend."""
+    if not SPEECH_TO_SPEECH_URL:
+        return {"sessions": [], "enabled": False, "discovery_error": None}
+    parts = urlsplit(_webrtc_calls_url(SPEECH_TO_SPEECH_URL))
+    path = parts.path.removesuffix("/realtime/calls") + "/agent/sessions"
+    url = urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            response = await http.get(url)
+        response.raise_for_status()
+        return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Session inventory unavailable. Check the speech service.") from exc
+
+
 @app.get("/api/me")
 async def me(request: Request):
     """Login state, tier, and remaining daily budget. Only meaningful in LB mode;

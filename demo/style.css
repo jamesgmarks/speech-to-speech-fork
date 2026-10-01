@@ -1860,6 +1860,23 @@ body:not(.chat-panel-collapsed) .bubble-stack {
   scroll-behavior: smooth;
 }
 
+.chat-history[hidden], .agent-sessions[hidden] { display: none; }
+.session-tabs { display: flex; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--border); }
+.session-tabs button, .agent-sessions button { color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: pointer; font: inherit; }
+.session-tabs button[aria-pressed="true"] { background: var(--bg); border-color: #8f79ed; }
+.agent-sessions { min-height: 0; flex: 1; overflow-y: auto; padding: 16px 20px; font-size: 13px; }
+.sessions-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+#sessions-status { flex: 1; color: var(--text-dim); }
+.agent-sessions .session-card { display: block; text-align: left; width: 100%; margin: 0 0 10px; padding: 12px; overflow-wrap: anywhere; }
+.session-card[aria-pressed="true"] { border-color: #8f79ed; }
+.session-card strong { display: block; margin-bottom: 6px; }
+.session-card span { display: block; margin-top: 5px; color: var(--text-dim); }
+.session-card .session-state { color: #69d0dc; }
+.session-card pre { white-space: pre-wrap; font: inherit; max-height: 170px; overflow: auto; }
+#session-message-form label { display: block; margin: 16px 0 8px; }
+#session-message { width: 100%; resize: vertical; padding: 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font: inherit; margin-bottom: 8px; }
+#session-message-status { color: var(--text-dim); }
+
 @media (max-width: 900px) {
   body {
     grid-template-columns: minmax(0, 1fr);

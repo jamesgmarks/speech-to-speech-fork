@@ -791,6 +791,16 @@ export class S2sRealtimeClient extends EventTarget {
     this._session?.addImage(dataUrl, { triggerResponse: false });
   }
 
+  /** Send a sidebar follow-up through the same agent and permission channel. */
+  sendUserText(text, { displayText = text } = {}) {
+    if (!this._session) throw new Error("Start the voice conversation to send a message.");
+    this._responseRequested = true;
+    this._session.sendMessage(text);
+    this.dispatchEvent(new CustomEvent("transcript", { detail: {
+      role: "user", text: displayText, partial: false, itemId: `sidebar_${crypto.randomUUID()}`,
+    } }));
+  }
+
   /** @param {boolean} muted */
   setMuted(muted) {
     this._muted = muted;

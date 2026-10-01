@@ -20,6 +20,7 @@
 import { S2sRealtimeClient, normalizePlaybackBufferMs } from "./s2s-realtime-client.js?v=audio-24k-v2";
 import { $, truncateError, DEBUG } from "./ui/dom.js";
 import { ChatView } from "./ui/chat.js";
+import { AgentSessions } from "./ui/agent-sessions.js";
 import { Account } from "./ui/account.js";
 import { AgentPermissions } from "./ui/agent-permissions.js";
 import { populateVoiceChoices } from "./ui/voice-choices.js";
@@ -394,6 +395,10 @@ let queuedTicketId = "";
 
 /** @type {RealtimeClient | null} */
 let client = null;
+new AgentSessions({ sendMessage(message, options) {
+  if (!client || !LIVE_STATES.has(currentState)) throw new Error("Start the voice conversation to send a message.");
+  client.sendUserText(message, options);
+} });
 /** @type {MediaStream | null} */
 let micStream = null;
 let micMuted = false;

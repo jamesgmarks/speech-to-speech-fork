@@ -361,6 +361,16 @@ backends retain the existing preset selector.
 
 ### Claude tool approvals
 
+Use the sidebar's **Sessions** tab to see app-owned independent sessions and
+other live Claude sessions. It refreshes activity every two seconds while visible,
+shows directories and the latest app-owned reply, and marks sessions linked to
+the voice agent. Select a session to send it a follow-up through the connected
+voice agent and its usual permissions. Conversation and Sessions share the
+nonmodal sidebar; the orb, microphone and settings remain usable. Managed
+sessions survive voice-call disconnects until stopped or the speech backend exits.
+The read-only `/api/agent-sessions` proxy only accesses `SPEECH_TO_SPEECH_URL`;
+external discovery requires a Claude CLI supporting `agents --json`.
+
 With the `claude-agent-sdk` backend, pending native tool requests appear in a
 Claude requests panel with exact tool inputs and **Allow once** / **Deny**.
 You can also say **“approve request”** or **“deny request”** while one request is

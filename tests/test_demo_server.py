@@ -55,6 +55,33 @@ async def test_voice_catalog_proxy_uses_only_pinned_backend(monkeypatch):
     assert len(requested) == 1
 
 
+async def test_session_inventory_proxy_is_pinned_and_has_no_message_endpoint(monkeypatch):
+    requested = []
+    inventory = {"sessions": [{"name": "review", "state": "working"}], "enabled": True}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            requested.append(url)
+            return httpx.Response(200, json=inventory, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "wss://speech.example/prefix/v1/realtime")
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", Client)
+    assert await demo_server.agent_sessions() == inventory
+    assert requested == ["https://speech.example/prefix/v1/agent/sessions"]
+    assert sum(route.path == "/api/me" for route in demo_server.app.routes) == 1
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "")
+    assert not (await demo_server.agent_sessions())["enabled"]
+
+
 def test_resolve_tier_prefers_oauth_pro_without_hub_lookup(monkeypatch):
     def unexpected_get(*args, **kwargs):
         pytest.fail("OAuth PRO users must not require a whoami-v2 lookup")

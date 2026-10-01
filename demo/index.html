@@ -170,7 +170,21 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </header>
+        <nav class="session-tabs" aria-label="Sidebar views">
+          <button id="conversation-view" type="button" aria-pressed="true">Conversation</button>
+          <button id="sessions-view" type="button" aria-pressed="false">Sessions</button>
+        </nav>
         <div id="chat-history" class="chat-history"></div>
+        <section id="agent-sessions" class="agent-sessions" aria-label="Agent sessions" hidden>
+          <div class="sessions-controls"><span id="sessions-status" role="status">Loading sessions…</span><button id="sessions-refresh" type="button">Refresh</button></div>
+          <div id="sessions-list"></div>
+          <form id="session-message-form" hidden>
+            <label for="session-message">Message <span id="session-message-target"></span></label>
+            <textarea id="session-message" rows="3" maxlength="16384" placeholder="Send a follow-up task" required></textarea>
+            <button type="submit">Send through voice agent</button>
+            <p id="session-message-status" role="status"></p>
+          </form>
+        </section>
       </div>
     </aside>
 
