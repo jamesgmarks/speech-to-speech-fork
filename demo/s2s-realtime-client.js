@@ -253,7 +253,7 @@ export class S2sRealtimeClient extends EventTarget {
     return {
       outputModalities: ["audio"],
       providerData: {
-        extensions: ["speech_to_speech.input_audio_transcription.snapshot"],
+        extensions: ["speech_to_speech.input_audio_transcription.snapshot", "speech_to_speech.voices"],
       },
       audio: {
         input: {
@@ -541,6 +541,9 @@ export class S2sRealtimeClient extends EventTarget {
     if (typeof type !== "string") return;
     if (this._debug) console.debug(`[${this.options.transport}]`, event);
     switch (type) {
+      case "speech_to_speech.voices":
+        this.dispatchEvent(new CustomEvent("voice-catalog", { detail: event }));
+        break;
       case "speech_to_speech.agent.permission.requested":
         this.dispatchEvent(new CustomEvent("agent-permission-requested", { detail: event }));
         break;

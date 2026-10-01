@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from queue import Empty, Queue
 from threading import Event as ThreadingEvent
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 
 import numpy as np
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
@@ -50,6 +50,7 @@ from speech_to_speech.pipeline.events import (
 from speech_to_speech.pipeline.log_context import pipeline_log_ctx
 from speech_to_speech.pipeline.messages import AUDIO_RESPONSE_DONE, PIPELINE_END, AudioOutput
 from speech_to_speech.pipeline.transcript_logging import log_exception
+from speech_to_speech.TTS.voice_profiles import VoiceCatalogEvent
 
 # aiortc (the 'webrtc' extra) is optional. Import it here, at module load,
 # rather than lazily in the calls endpoint: the av/cryptography C extensions
@@ -459,11 +460,17 @@ async def _dispatch_client_event(
         transport.discard_pending_audio()
 
     elif isinstance(event, SessionUpdateEvent):
+        voice_error = _validate_profile_voice(unit, event.session)
+        if voice_error:
+            await send_correlated([voice_error])
+            return
         err = service.handle_session_update(session_id, event)
         if err:
             await send_correlated([err])
         else:
             await send_correlated([service.build_session_updated(session_id)])
+            if "speech_to_speech.voices" in (getattr(event.session, "extensions", None) or []):
+                await transport.send_events([VoiceCatalogEvent(**_voice_catalog(unit))])
 
     elif isinstance(event, ConversationItemCreateEvent):
         events = service.handle_conversation_item_create(session_id, event)
@@ -479,6 +486,10 @@ async def _dispatch_client_event(
         logger.debug("Accepted conversation.item.truncate for %s", event.item_id)
 
     elif isinstance(event, ResponseCreateEvent):
+        voice_error = _validate_profile_voice(unit, event.response)
+        if voice_error:
+            await send_correlated([voice_error])
+            return
         result = service.handle_response_create(session_id, event)
         if result:
             response_key = None
@@ -502,6 +513,24 @@ async def _dispatch_client_event(
         if events:
             await send_correlated(events)
         unit.response_playing.clear()
+
+
+def _voice_catalog(unit: PipelineUnit) -> dict[str, Any]:
+    for handler in unit.handlers:
+        catalog = getattr(handler, "voice_catalog", None)
+        if callable(catalog):
+            return cast(dict[str, Any], catalog())
+    return {"voices": [], "default": None}
+
+
+def _validate_profile_voice(unit: PipelineUnit, config: Any) -> Any:
+    audio = getattr(config, "audio", None)
+    output = getattr(audio, "output", None)
+    voice = getattr(output, "voice", None)
+    if isinstance(voice, str) and voice.startswith("custom:"):
+        if voice not in {v["id"] for v in _voice_catalog(unit)["voices"]}:
+            return unit.service.make_error(f"Unknown custom voice: {voice}", "invalid_voice")
+    return None
 
 
 def create_app(
@@ -533,6 +562,10 @@ def create_app(
     app = FastAPI(lifespan=lifespan)
 
     llm_proxy_usage = mount_llm_proxy(app, llm_proxy_config)
+
+    @app.get("/v1/voices")
+    async def voices_endpoint() -> dict[str, Any]:
+        return _voice_catalog(pool[0]) if pool else {"voices": [], "default": None}
 
     def _claim_unit(transport: SessionTransport | None) -> PipelineUnit | None:
         """Atomically (between asyncio yield points) reserve the first idle unit.

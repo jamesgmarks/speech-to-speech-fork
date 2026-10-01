@@ -87,6 +87,7 @@ from speech_to_speech.pipeline.queue_types import TextPromptItem
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
 from speech_to_speech.pipeline.transcript_logging import log_exception, transcript_for_log
 from speech_to_speech.pipeline.turn_latency import TurnLatencyStore
+from speech_to_speech.TTS.voice_profiles import VoiceCatalogEvent
 from speech_to_speech.utils.utils import _generate_id
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,7 @@ ClientEvent = Union[
 ]
 
 ServerEvent = Union[
+    VoiceCatalogEvent,
     AgentPermissionRequested,
     AgentPermissionResolved,
     AgentPermissionVoice,

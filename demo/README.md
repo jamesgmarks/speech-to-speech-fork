@@ -338,6 +338,22 @@ For a backend that executes its own tools, such as `claude-agent-sdk`, set
 browser search/camera function definitions; the backend's native tools remain
 available.
 
+### Custom voice choices
+
+For Qwen3-TTS Base cloning, register voices on the backend with
+`--qwen3_tts_voice_profiles /path/to/voices.json` (see the main README).
+The demo loads the pinned backend's catalog through `GET /api/voices` and
+shows it in **Settings → Voice**. **Save** changes the active session's voice
+and remembers the choice. Unsupported saved presets fall back to the backend's
+default; Base profiles each use their own reference audio and transcript.
+
+Direct and load-balanced WebSocket connections, as well as WebRTC, also
+discover choices after connecting: the demo negotiates the
+`speech_to_speech.voices` session extension and receives a same-named event
+with `voices` (`id`, `name`, `kind`) and `default`. The HTTP proxy forwards
+only to `SPEECH_TO_SPEECH_URL`, never to browser-supplied addresses. Older
+backends retain the existing preset selector.
+
 ### Claude tool approvals
 
 With the `claude-agent-sdk` backend, pending native tool requests appear in a

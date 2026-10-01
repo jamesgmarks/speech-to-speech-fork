@@ -60,6 +60,50 @@ from .realtime_contract import (
 # ---------------------------------------------------------------------------
 
 
+def test_voice_catalog_and_negotiated_discovery(setup, monkeypatch):
+    app, *_ = setup
+    catalog = {"voices": [{"id": "custom:james", "name": "James", "kind": "custom"}], "default": "custom:james"}
+    monkeypatch.setattr(router_module, "_voice_catalog", lambda unit: catalog)
+    with TestClient(app) as client:
+        assert client.get("/v1/voices").json() == catalog
+        with client.websocket_connect("/v1/realtime") as ws:
+            ws.receive_json()
+            ws.send_json(
+                {
+                    "type": "session.update",
+                    "session": {
+                        "type": "realtime",
+                        "extensions": ["speech_to_speech.voices"],
+                        "audio": {"output": {"voice": "custom:james"}},
+                    },
+                }
+            )
+            assert ws.receive_json()["type"] == "session.updated"
+            assert ws.receive_json() == {"type": "speech_to_speech.voices", **catalog}
+
+
+@pytest.mark.parametrize("event_type", ["session.update", "response.create"])
+def test_unknown_custom_voice_is_rejected_before_configuration_or_generation(setup, monkeypatch, event_type):
+    app, service, *_ = setup
+    monkeypatch.setattr(router_module, "_voice_catalog", lambda unit: {"voices": [], "default": None})
+    with TestClient(app) as client:
+        with client.websocket_connect("/v1/realtime") as ws:
+            created = ws.receive_json()
+            before = created["session"]["audio"]["output"]["voice"]
+            field = "session" if event_type == "session.update" else "response"
+            config = {"audio": {"output": {"voice": "custom:missing"}}}
+            if field == "session":
+                config["type"] = "realtime"
+            ws.send_json({"type": event_type, "event_id": "bad_voice", field: config})
+            error = ws.receive_json()
+            assert error["type"] == "error"
+            assert error["error"]["event_id"] == "bad_voice"
+            assert "Unknown custom voice" in error["error"]["message"]
+            session_id = created["session"]["id"]
+            assert service._state(session_id).runtime_config.session.audio.output.voice == before
+            assert service.text_prompt_queue.empty()
+
+
 @pytest.fixture(autouse=True)
 def short_drain_timeout(monkeypatch):
     """Shorten the SESSION_END drain warning threshold so tests don't wait 10s.

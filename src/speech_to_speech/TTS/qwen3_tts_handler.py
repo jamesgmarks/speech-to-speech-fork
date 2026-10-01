@@ -40,6 +40,7 @@ from speech_to_speech.pipeline.messages import (
 from speech_to_speech.pipeline.speculative_turns import SpeculativeTurnTracker
 from speech_to_speech.pipeline.transcript_logging import log_exception
 from speech_to_speech.pipeline.turn_latency import active_turn_latency_tracker, bind_active_turn_latency_tracker
+from speech_to_speech.TTS.voice_profiles import load_voice_profiles
 from speech_to_speech.utils.mlx_lock import MLXLockContext
 from speech_to_speech.utils.utils import resolve_device
 
@@ -122,6 +123,7 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         ref_spk: str | Path | None = None,
         ref_rvq: str | Path | None = None,
         ref_text: str = DEFAULT_REF_TEXT,
+        voice_profiles: str | Path | None = None,
         language: str = "auto",
         speaker: Optional[str] = "Aiden",
         instruct: Optional[str] = None,
@@ -145,6 +147,10 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         self.ref_spk = self._normalize_optional_path(ref_spk)
         self.ref_rvq = self._normalize_optional_path(ref_rvq)
         self.ref_text = ref_text
+        self.voice_profiles = load_voice_profiles(voice_profiles)
+        if self.voice_profiles and not (self.ref_audio or self.ref_spk or self.ref_rvq):
+            first_profile = next(iter(self.voice_profiles.values()))
+            self.ref_audio, self.ref_text = first_profile.ref_audio, first_profile.ref_text
         self.language = self._normalize_language(language)
         self.detect_llm_output_language = detect_llm_output_language
         self.speaker = speaker
@@ -216,6 +222,9 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         self._initial_ref_audio = self.ref_audio
         self._initial_ref_spk = self.ref_spk
         self._initial_ref_rvq = self.ref_rvq
+        self._initial_ref_text = self.ref_text
+        if self.voice_profiles and self._model_type() != "base":
+            raise ValueError("qwen3_tts_voice_profiles requires a Qwen3-TTS Base voice-cloning model.")
 
         self.warmup()
 
@@ -542,7 +551,23 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
             sess_voice = output.voice if output is not None else None
             session_voice = str(sess_voice) if sess_voice else None
         if not session_voice:
+            if hasattr(self, "_initial_ref_text"):
+                self.on_session_end()
             return
+
+        if session_voice == "default" and model_type == "base":
+            self.on_session_end()
+            return
+
+        profile = getattr(self, "voice_profiles", {}).get(session_voice)
+        if profile is not None:
+            if self.ref_audio != profile.ref_audio or self.ref_text != profile.ref_text:
+                self.ref_audio, self.ref_text = profile.ref_audio, profile.ref_text
+                self._clear_cached_voice_reference()
+                logger.info("Qwen3-TTS selected voice profile %s (%s)", profile.id, profile.name)
+            return
+        if session_voice.startswith("custom:"):
+            raise ValueError(f"Unknown Qwen3-TTS voice profile: {session_voice}")
 
         if model_type == "custom_voice":
             supported_speakers = self._supported_speakers()
@@ -574,6 +599,8 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
             "Ignoring Qwen3-TTS session voice override because it is not an audio file path: %r",
             session_voice,
         )
+        if hasattr(self, "_initial_ref_text"):
+            self.on_session_end()
 
     def warmup(self) -> None:
         logger.info(f"Warming up {self.__class__.__name__}")
@@ -615,6 +642,27 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
                     return None
                 return [str(speaker) for speaker in speakers if speaker]
         return None
+
+    def voice_catalog(self) -> dict[str, Any]:
+        """Public choices supported by this loaded model, without reference paths."""
+        if self._model_type() == "custom_voice":
+            speakers = self._supported_speakers() or [self._initial_speaker or "Aiden"]
+            preset_default = next(
+                (s for s in speakers if s.lower() == (self._initial_speaker or "").lower()), speakers[0]
+            )
+            return {"voices": [{"id": s, "name": s, "kind": "builtin"} for s in speakers], "default": preset_default}
+        if self._model_type() != "base":
+            return {"voices": [], "default": None}
+        profiles = list(self.voice_profiles.values())
+        voices = [{"id": p.id, "name": p.name, "kind": "custom"} for p in profiles]
+        initial_audio = self._resolve_audio_path(self._initial_ref_audio) if self._initial_ref_audio else None
+        default = next(
+            (p.id for p in profiles if p.ref_audio == initial_audio and p.ref_text == self._initial_ref_text), None
+        )
+        if default is None and (self._initial_ref_audio or self._initial_ref_spk):
+            voices.insert(0, {"id": "default", "name": "Default reference", "kind": "custom"})
+            default = "default"
+        return {"voices": voices, "default": default or (profiles[0].id if profiles else None)}
 
     def _resolve_speaker(self) -> Optional[str]:
         if self.speaker:
@@ -1046,6 +1094,7 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         self.ref_audio = self._initial_ref_audio
         self.ref_spk = self._initial_ref_spk
         self.ref_rvq = self._initial_ref_rvq
+        self.ref_text = self._initial_ref_text
         logger.debug("Qwen3-TTS session state reset")
 
     def cleanup(self) -> None:

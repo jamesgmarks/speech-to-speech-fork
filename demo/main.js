@@ -22,6 +22,7 @@ import { $, truncateError, DEBUG } from "./ui/dom.js";
 import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
 import { AgentPermissions } from "./ui/agent-permissions.js";
+import { populateVoiceChoices } from "./ui/voice-choices.js";
 
 
 const DEFAULT_VOICE = "Aiden";
@@ -941,6 +942,17 @@ async function fetchConfig() {
   void account.refresh();
   syncToolsUi();
   syncConnectionUi();
+  if (pinnedUrl) {
+    try {
+      const res = await fetch("api/voices");
+      if (res.ok) {
+        settings.voice = populateVoiceChoices(inputVoice, await res.json(), settings.voice);
+        localStorage.setItem(STORAGE_KEYS.voice, settings.voice);
+      }
+    } catch {
+      // Older backends keep the existing preset selector.
+    }
+  }
 }
 
 /**
@@ -1396,12 +1408,23 @@ function stopJoinCountdown() {
  * @param {AudioContext | null} [audioContext]
  */
 async function doStart(audioContext = null) {
+  // Keep AudioContext creation inside the tap gesture while waiting for the
+  // backend's supported voices and default before constructing the client.
+  if (!audioContext) audioContext = createResumedAudioContext();
+  setState("connecting");
+  await configReady;
   const transport = effectiveTransport();
-  // Resolve the target before touching mic/audio so a misconfiguration (e.g.
+  // Resolve the target before requesting the mic so a misconfiguration (e.g.
   // direct mode with no URL) fails fast with a clear message. Over WebRTC the
   // browser never dials the s2s server itself — the offer goes to the
   // same-origin /api/calls proxy — so there is no target to resolve.
-  const target = transport === "webrtc" ? null : connectionTarget();
+  let target;
+  try {
+    target = transport === "webrtc" ? null : connectionTarget();
+  } catch (error) {
+    void audioContext.close().catch(() => {});
+    throw error;
+  }
   activeTransport = transport;
   // The radial gate arc (threshold handle around the mic button) is a WS
   // feature; over WebRTC only the mute button remains.
@@ -1411,12 +1434,6 @@ async function doStart(audioContext = null) {
   chat.reset();
   setState("connecting");
   setCaption("Asking for mic…", "muted");
-
-  // Create + resume the AudioContext SYNCHRONOUSLY, still inside the gesture.
-  // iOS Safari only starts an AudioContext from a user gesture; if we waited
-  // until after the getUserMedia / session-creation awaits below, it would stay
-  // suspended and the whole pipeline would be silent.
-  if (!audioContext) audioContext = createResumedAudioContext();
 
   // Prime the mic permission now (get the prompt out of the way up front), then
   // release it. The real capture stream is acquired only once a slot is granted
@@ -1463,6 +1480,16 @@ async function doStart(audioContext = null) {
       });
   client = c;
   c.setMuted(micMuted || userAudioReplaying);
+  c.addEventListener("voice-catalog", (event) => {
+    if (client !== c) return;
+    const catalog = /** @type {CustomEvent} */ (event).detail;
+    const selected = populateVoiceChoices(inputVoice, catalog, settings.voice);
+    if (selected !== settings.voice) {
+      settings.voice = selected;
+      localStorage.setItem(STORAGE_KEYS.voice, selected);
+      c.updateSession({ voice: selected });
+    }
+  });
 
   c.addEventListener("queue", (e) => {
     const { position, queueId } = /** @type {CustomEvent<{ position: number; queueId: string }>} */ (e).detail;
@@ -1716,7 +1743,8 @@ async function onFatalError(err) {
 setState("idle");
 chat.renderEmptyState();
 initGateArc();
-void fetchConfig().then(() => autoStartCamera());
+const configReady = fetchConfig();
+void configReady.then(() => autoStartCamera());
 // Start the webcam as soon as the user lands (camera tool defaults on), and
 // react to later permission changes (re-grant after a denial re-enables it).
 void watchCameraPermission();

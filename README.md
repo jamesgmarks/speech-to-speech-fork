@@ -312,6 +312,35 @@ speech-to-speech serve \
 
 The default model is `gpt-5.6-terra` through the OpenAI Responses API with reasoning effort `none`, preserving the previous default model's latency-oriented reasoning behavior. Override the model with `--model_name`, the effort with `--responses_api_reasoning_effort`, and set `--responses_api_base_url` for another OpenAI-compatible provider or server.
 
+### Custom voices in the demo
+
+Qwen3-TTS Base models can switch between registered reference voices through
+the demo's **Settings → Voice** selector. Start the backend with
+`--qwen3_tts_voice_profiles /path/to/voices.json`. Each entry pairs a WAV with
+its exact transcript, using paths relative to the JSON file:
+
+```json
+[
+  {
+    "id": "custom:my-voice",
+    "name": "My voice",
+    "ref_audio": "my-voice/reference.wav",
+    "ref_text_file": "my-voice/reference.txt"
+  }
+]
+```
+
+Use a Qwen3-TTS **Base** model for these profiles. Without an explicit initial
+reference, the first profile is the default. Duplicate IDs, missing files,
+and empty transcripts fail at startup. The browser receives public IDs and
+labels; selecting a profile switches both audio and transcript and resets
+cached speaker references. Click **Save** to use it for upcoming speech;
+the selection persists across browser reloads.
+
+The selector lists voices supported by the loaded model: reference profiles
+for Base, preset speakers for CustomVoice. These model variants have different
+voice capabilities. `GET /v1/voices` returns the available choices and default.
+
 ### Local Mac
 
 Start with [Apple Silicon, fully local](#apple-silicon-fully-local). Its `--mac-optimal-settings` preset supplies MPS defaults for supported components, Parakeet TDT for STT, MLX LM for the LLM, and Qwen3-TTS through `mlx-audio` with the `6bit` variant.

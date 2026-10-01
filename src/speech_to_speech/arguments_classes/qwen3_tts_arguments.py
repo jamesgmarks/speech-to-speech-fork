@@ -64,6 +64,12 @@ class Qwen3TTSHandlerArguments:
             "help": "Optional path to reference audio file for voice cloning. Leave unset when using a CustomVoice model."
         },
     )
+    qwen3_tts_voice_profiles: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "JSON voice catalog for Base cloning models: each entry has id (custom:name), name, ref_audio, and ref_text_file. Paths are relative to the catalog."
+        },
+    )
     qwen3_tts_ref_spk: Optional[str] = field(
         default=None,
         metadata={

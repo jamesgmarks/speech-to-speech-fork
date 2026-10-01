@@ -41,6 +41,8 @@ test("the pinned SDK changes the live voice and explicitly clears all tools", as
   const voiceUpdate = sent.at(-1)?.session;
   assert.equal(voiceUpdate?.audio?.output?.voice, "Coral");
   assert.equal(voiceUpdate?.instructions, "Updated instructions.");
+  client.updateSession({ voice: "custom:pepper-upbeat" });
+  await waitFor(() => sent.at(-1)?.session?.audio?.output?.voice === "custom:pepper-upbeat");
 
   const beforeClear = sent.length;
   client.setTools([]);
@@ -120,7 +122,7 @@ test("speculative transcript snapshots update display and prune on completion", 
   });
 
   const config = client._sessionConfig();
-  assert.deepEqual(config.providerData?.extensions, ["speech_to_speech.input_audio_transcription.snapshot"]);
+  assert.deepEqual(config.providerData?.extensions, ["speech_to_speech.input_audio_transcription.snapshot", "speech_to_speech.voices"]);
 
   const transcripts = [];
   client.addEventListener("transcript", (event) => transcripts.push(event.detail));
@@ -189,6 +191,7 @@ test("the client negotiates speculative snapshot extensions on the wire", async 
   const initialSession = sent[0]?.session;
   assert.deepEqual(initialSession?.extensions, [
     "speech_to_speech.input_audio_transcription.snapshot",
+    "speech_to_speech.voices",
   ]);
 
   client.updateSession({ voice: "Coral" });
@@ -196,6 +199,7 @@ test("the client negotiates speculative snapshot extensions on the wire", async 
   const updatedSession = sent.at(-1)?.session;
   assert.deepEqual(updatedSession?.extensions, [
     "speech_to_speech.input_audio_transcription.snapshot",
+    "speech_to_speech.voices",
   ]);
 });
 

@@ -28,6 +28,33 @@ def _mock_whoami(monkeypatch, payload):
     return calls
 
 
+async def test_voice_catalog_proxy_uses_only_pinned_backend(monkeypatch):
+    catalog = {"voices": [{"id": "custom:pepper", "name": "Pepper", "kind": "custom"}], "default": "custom:pepper"}
+    requested = []
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            requested.append(url)
+            return httpx.Response(200, json=catalog, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "wss://speech.example/prefix/v1/realtime?token=local")
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", FakeAsyncClient)
+    assert await demo_server.voices() == catalog
+    assert requested == ["https://speech.example/prefix/v1/voices?token=local"]
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "")
+    assert await demo_server.voices() == {"voices": [], "default": None}
+    assert len(requested) == 1
+
+
 def test_resolve_tier_prefers_oauth_pro_without_hub_lookup(monkeypatch):
     def unexpected_get(*args, **kwargs):
         pytest.fail("OAuth PRO users must not require a whoami-v2 lookup")
