@@ -276,7 +276,9 @@ def test_audio_asset_version_propagates_to_the_worklets():
 
     version = "audio-24k-v2"
     assert f"main.js?v={version}" in index
-    assert f"s2s-realtime-client.js?v={version}" in main
+    # The server's revisioned import map owns the client module's cache key;
+    # worklets keep their explicit audio protocol version below.
+    assert 'from "./s2s-realtime-client.js"' in main
     assert f'AUDIO_WORKLET_VERSION = "{version}"' in client
     assert 'versionedAudioWorkletUrl("mic-capture.js", base)' in client
     assert 'versionedAudioWorkletUrl("audio-playback.js", base)' in client
