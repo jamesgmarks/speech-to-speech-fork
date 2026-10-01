@@ -2,6 +2,7 @@
   "sample_rate": 24000,
   "gap_seconds": 0.2,
   "edge_fade_ms": 6,
+  "noise_probe": {"source": "trash", "start": 11.45, "end": 12.08},
   "segments": [
     {
       "id": "plans-fact",
