@@ -97,6 +97,25 @@ class ClaudeAgentSDKArguments(LanguageModelBaseArguments):
         metadata={"help": "Optional MCP configuration JSON file; configured Claude Code tools remain available."},
     )
 
+    claude_agent_terminal_tool: bool = field(
+        default=True,
+        metadata={
+            "help": "Provide this app's launch_agent_terminal tool to open independent interactive Claude Code sessions in macOS Terminal. Global and project tool registrations are unchanged."
+        },
+    )
+    claude_agent_session_tools: bool = field(
+        default=True,
+        metadata={
+            "help": "Provide app-only tools to create, list, message, and stop persistent independent Claude SDK sessions."
+        },
+    )
+    claude_agent_max_independent_sessions: int = field(
+        default=4,
+        metadata={
+            "help": "Maximum active app-owned independent SDK sessions. These survive voice disconnects until stopped or the app exits."
+        },
+    )
+
     claude_agent_permission_timeout_s: float = field(
         default=300.0,
         metadata={

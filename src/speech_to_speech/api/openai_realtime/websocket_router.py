@@ -21,6 +21,7 @@ from openai.types.realtime import (
 )
 
 from speech_to_speech.agent_interactions import AgentPermissionReply
+from speech_to_speech.agent_session_inventory import AgentSessionInventory
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
 from speech_to_speech.api.openai_realtime.service import (
@@ -564,6 +565,21 @@ def create_app(
                     pass
 
     app = FastAPI(lifespan=lifespan)
+
+    registry = next(
+        (
+            h._peer_sessions
+            for unit in pool
+            for h in unit.handlers
+            if getattr(h, "session_tools", False) and hasattr(h, "_peer_sessions")
+        ),
+        None,
+    )
+    agent_inventory = AgentSessionInventory(registry)
+
+    @app.get("/v1/agent/sessions")
+    async def agent_sessions_endpoint() -> dict[str, Any]:
+        return await agent_inventory.list()
 
     llm_proxy_usage = mount_llm_proxy(app, llm_proxy_config)
 

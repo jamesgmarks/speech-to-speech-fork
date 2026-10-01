@@ -629,6 +629,9 @@ that behavior is intended.
 | `--claude_agent_request_timeout_s` | Generation deadline including startup and tools, excluding human permission wait; default 120 seconds. |
 | `--claude_agent_background_timeout_s` | Deadline for native jobs after the foreground voice response ends, excluding permission wait; default 1800 seconds. |
 | `--claude_agent_max_background_sessions` | Concurrent SDK clients retained for native background jobs per call; default 4. |
+| `--claude_agent_session_tools` | Enable app-only independent session creation, messaging, discovery and stopping; default true. |
+| `--claude_agent_max_independent_sessions` | App-wide independent SDK client limit, including the external reply router; default 4. |
+| `--claude_agent_terminal_tool` | Enable the app-only visible macOS Terminal launcher; default true. |
 | `--claude_agent_orchestrator false` | Disable the prompt preference for delegating substantive work. Background completion handling and all native tools remain available. |
 | `--claude_agent_permission_timeout_s` | Time to answer each permission prompt or agent question; default 300 seconds. |
 | `--claude_agent_max_retries` | Retry limit for provider failures; unset uses Claude Code's default. |
@@ -638,6 +641,33 @@ that behavior is intended.
 | `--claude_agent_cwd`, `--claude_agent_setting_sources` | Workspace and Claude Code configuration sources. |
 | `--claude_agent_mcp_config` | Optional MCP configuration JSON file. |
 | `--claude_agent_permission_mode`, `--claude_agent_allowed_tools` | Configure permissions while retaining the toolset. |
+
+The app registers its `speech_to_speech` MCP tools on each voice SDK client,
+without editing global or project MCP configuration. `create_agent_session`
+starts a named independent root SDK client in an existing directory;
+`send_agent_message`, `list_agent_sessions`, and `stop_agent_session` manage it.
+Messages queue while it works, and actual replies arrive in conversation and
+speech asynchronously. These clients retain their native context across voice
+turns and call reconnects, until stopped or the backend exits. They are separate
+from call-scoped native Agent children. They are not restored after a backend restart.
+
+`list_external_agent_sessions` and `send_external_agent_message` use Claude's
+native cross-session tools through a persistent app-owned reply router. External
+sessions must support Claude cross-session messaging and retain their own
+inbound and approval policies. Only app-owned clients receive the scoped
+`crossSessionInbound: accept` setting. Disconnected voice calls cannot approve
+operations; reconnect and message the session to attach a new permission responder.
+`launch_agent_terminal` opens a separate interactive Claude Code instance in
+macOS Terminal. It accepts a directory and optional prompt, with no arbitrary
+shell command parameter. This terminal has its own approvals and may be found
+among external sessions. The shared launcher also supports the Codex CLI, but
+the voice backend currently only registers the Claude version.
+
+The demo sidebar's **Sessions** view lists app-owned and live external Claude
+sessions, activity, directories, queued work, latest app replies, and links to
+the voice agent. Select a session to send a follow-up through the voice agent
+and its normal permission flow. Discovery uses read-only `claude agents --json`
+through the deployment-pinned backend; polling never invokes a model.
 
 The token cap maps to Claude Code's documented
 [`CLAUDE_CODE_MAX_OUTPUT_TOKENS`](https://code.claude.com/docs/en/env-vars)

@@ -45,6 +45,7 @@ class RuntimeConfig(BaseModel):
         validate_default=True,
     )
     last_assistant_language: str | None = Field(default=None, exclude=True)
+    connection_active: bool = Field(default=True, exclude=True)
 
     @field_validator("session", mode="after")
     @classmethod

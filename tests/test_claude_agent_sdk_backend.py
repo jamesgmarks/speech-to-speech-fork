@@ -159,6 +159,8 @@ def test_all_tools_and_settings_are_available_and_limits_reach_sdk():
         permission_mode="acceptEdits",
         allowed_tools=["Bash(ls *)"],
         mcp_config="/tmp/mcp.json",
+        terminal_tool=False,
+        session_tools=False,
     )
     list(h.process(request()))
     options = FakeClient.instances[0].options
@@ -175,6 +177,70 @@ def test_all_tools_and_settings_are_available_and_limits_reach_sdk():
     assert options.system_prompt["preset"] == "claude_code"
     assert "Speak clearly." in options.system_prompt["append"]
     assert options.setting_sources == ["user", "project", "local"]
+
+
+def test_terminal_server_is_client_local_and_preserves_external_mcp(tmp_path):
+    config = tmp_path / "mcp.json"
+    config.write_text(json.dumps({"mcpServers": {"external": {"command": "existing-server"}}}))
+    h = handler(mcp_config=str(config))
+    list(h.process(request()))
+    first = FakeClient.instances[-1].options
+    list(h.process(request()))
+    second = FakeClient.instances[-1].options
+    assert first.mcp_servers["external"] == {"command": "existing-server"}
+    assert first.mcp_servers["speech_to_speech"]["type"] == "sdk"
+    assert first.mcp_servers["speech_to_speech"]["instance"] is not second.mcp_servers["speech_to_speech"]["instance"]
+    assert "mcp__speech_to_speech__launch_agent_terminal" in first.system_prompt["append"]
+    assert first.tools == {"type": "preset", "preset": "claude_code"}
+    assert first.allowed_tools == []  # Normal permissions, no silent preapproval.
+    assert h._sdk_kwargs["mcp_servers"] == str(config)
+
+
+@pytest.mark.parametrize("decision", ["allow", "deny"])
+def test_terminal_tool_uses_existing_permission_ui_and_only_launches_on_allow(monkeypatch, tmp_path, decision):
+    from threading import Thread
+    from types import SimpleNamespace
+
+    tools = []
+    original = adapter.create_sdk_mcp_server
+
+    def server(**kwargs):
+        tools.extend(kwargs["tools"])
+        return original(**kwargs)
+
+    monkeypatch.setattr(adapter, "create_sdk_mcp_server", server)
+    calls = []
+    events = Queue()
+    h = handler(text_output_queue=events)
+    monkeypatch.setattr(
+        h._terminal_launcher, "launch", lambda *args: calls.append(args) or {"status": "launch_requested"}
+    )
+
+    async def receive(self):
+        args = {"directory": str(tmp_path), "prompt": "Review the tests."}
+        approval = await self.options.can_use_tool(
+            "mcp__speech_to_speech__launch_agent_terminal", args, SimpleNamespace()
+        )
+        if approval.behavior == "allow":
+            terminal_tool = next(t for t in tools if t.name == "launch_agent_terminal")
+            response = await terminal_tool.handler(approval.updated_input)
+            assert json.loads(response["content"][0]["text"])["status"] == "launch_requested"
+        for message in self.messages:
+            yield message
+
+    monkeypatch.setattr(FakeClient, "receive_response", receive)
+    req = request()
+    outputs = []
+    worker = Thread(target=lambda: outputs.extend(h.process(req)))
+    worker.start()
+    event = events.get(timeout=2)
+    assert event.event.tool_name == "mcp__speech_to_speech__launch_agent_terminal"
+    assert not calls
+    assert req.runtime_config.agent_interactions.respond(event.event.request_id, decision) is None
+    worker.join(2)
+    assert not worker.is_alive() and outputs[-1].error is None
+    assert calls == ([(str(tmp_path), "Review the tests.")] if decision == "allow" else [])
+    h.cleanup()
 
 
 @pytest.mark.parametrize(

@@ -412,6 +412,7 @@ class RealtimeService:
     def unregister(self, conn_id: str) -> None:
         st = self._conns.pop(conn_id, None)
         if st is not None:
+            st.runtime_config.connection_active = False
             # Suppress any in-flight compaction splice so a daemon worker can't
             # mutate a Chat tied to a closed session, and don't make further
             # billable LLM calls on its behalf once the splice is suppressed.
