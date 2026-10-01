@@ -1,0 +1,56 @@
+{
+  "sample_rate": 24000,
+  "gap_seconds": 0.2,
+  "edge_fade_ms": 6,
+  "denoise_mix": 0.0,
+  "all_lines_basename": "all-forrest-excerpts",
+  "noise_probe": {
+    "source": "love",
+    "start": 2.25,
+    "end": 2.7
+  },
+  "segments": [
+    {
+      "id": "gump",
+      "source": "gump",
+      "start": 0.0,
+      "end": 2.0193,
+      "text": "Hello, I'm Forrest. Forrest Gump."
+    },
+    {
+      "id": "love",
+      "source": "love",
+      "start": 0.06,
+      "end": 5.84,
+      "text": "I'm not a smart man, but I know what love is."
+    },
+    {
+      "id": "people-call-me",
+      "source": "people_call_me",
+      "start": 0.0,
+      "end": 3.57,
+      "text": "My name's Forrest Gump. People call me Forrest Gump."
+    },
+    {
+      "id": "rocks",
+      "source": "rocks",
+      "start": 0.06,
+      "end": 3.64,
+      "text": "Sometimes I guess there just aren't enough rocks."
+    },
+    {
+      "id": "shoes",
+      "source": "shoes",
+      "start": 0.0,
+      "end": 3.08,
+      "text": "There's an awful lot you can tell about a person by their shoes."
+    }
+  ],
+  "reference_order": [
+    "people-call-me",
+    "shoes",
+    "rocks",
+    "love"
+  ],
+  "note": "Speaker attribution and transcripts from the supplied screenshot, checked with local Parakeet alignment. Gump is corrected from the ASR's Gum. The shoes excerpt ends after its first complete sentence; the later clause is excluded. The shorter greeting is kept in all-forrest-excerpts as an alternative to the longer introduction."
+}
