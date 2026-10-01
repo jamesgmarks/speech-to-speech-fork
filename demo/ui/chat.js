@@ -125,6 +125,18 @@ export class ChatView {
     } catch (error) { console.warn("Could not save conversation display", error); }
   }
 
+  /** Deliberate reset; transport stop/start never calls this. */
+  startNewConversation() {
+    this.reset({ dismiss: true });
+    this.clear();
+    this.conversationKey = crypto.randomUUID();
+    // A one-time resume URL must not resurrect the previous conversation on reload.
+    const url = new URL(location.href);
+    url.searchParams.delete("conversation");
+    history.replaceState(history.state, "", url.href);
+    this._persistConversation();
+  }
+
   /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string}>}} info */
   onConversationRestored(info) {
     if (info.key !== this.conversationKey || typeof info.backend !== "string") return;

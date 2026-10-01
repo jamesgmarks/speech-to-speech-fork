@@ -721,6 +721,11 @@ Changing voices, instructions, transport, reconnecting, reloading the page, or
 restarting the service resumes the conversation without another startup greeting.
 Changing the LLM backend clears both history and context; changing a model within
 the same backend does not. Normal context trimming and compaction still apply.
+To deliberately start fresh, choose **Start a new conversation** in Settings.
+**Reconnect with these settings** and the main Stop/start controls preserve the
+conversation. The demo versions its complete JavaScript module graph and styles
+so an ordinary page refresh loads updated persistence behavior even when older
+scripts were cached.
 Audio playback blobs and pending permissions are not stored across page reloads.
 Clients can opt in with a UUID `conversation_key` query parameter on the WebSocket
 or WebRTC calls URL, plus `conversation_backend` with the last acknowledged backend

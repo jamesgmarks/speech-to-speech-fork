@@ -90,5 +90,18 @@ test("settings discover custom voices, migrate an unsupported preset, and persis
     history: [{ role: "user", text: "Recovered from durable context." }],
   }));
   assert.equal(await page.locator(".hist-body").textContent(), "Recovered from durable context.");
+  const oldKey = await page.evaluate(() => chat.conversationKey);
+  await page.evaluate(() => {
+    history.replaceState({}, "", "?conversation=" + chat.conversationKey);
+    chat.startNewConversation();
+  });
+  const freshKey = await page.evaluate(() => chat.conversationKey);
+  assert.notEqual(freshKey, oldKey);
+  assert.equal(await page.locator(".hist-msg").count(), 0);
+  assert.equal(new URL(page.url()).searchParams.has("conversation"), false);
+  await page.reload();
+  await initialize();
+  assert.equal(await page.evaluate(() => chat.conversationKey), freshKey);
+  assert.equal(await page.locator(".hist-msg").count(), 0);
   await page.close();
 });
