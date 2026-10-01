@@ -102,6 +102,7 @@ class ResponseHandler(RealtimeBaseHandler):
     def _end_response(self, conn_id: str, status: _ResponseStatus = "completed") -> None:
         st = self._state(conn_id)
         completed_response_key = st.current_response_key
+        self._service.finish_background_delivery(conn_id, completed_response_key, status)
         if status == "cancelled":
             st.response_usage.responses_cancelled += 1
         else:
@@ -753,7 +754,9 @@ class ResponseHandler(RealtimeBaseHandler):
 
     # ── Public handlers ───────────────────────────
 
-    def handle_response_create(self, conn_id: str, event: ResponseCreateEvent) -> ServerEvent | None:
+    def handle_response_create(
+        self, conn_id: str, event: ResponseCreateEvent, *, turn_independent: bool = False
+    ) -> ServerEvent | None:
         """Trigger a response.
 
         Returns a ``ResponseCreatedEvent`` on success, a ``RealtimeErrorEvent``
@@ -832,9 +835,9 @@ class ResponseHandler(RealtimeBaseHandler):
         request = GenerateResponseRequest(
             runtime_config=cfg,
             response=event.response,
-            turn_id=None if out_of_band else st.speculative_user_turn_id,
-            turn_revision=None if out_of_band else st.speculative_user_turn_revision,
-            speech_stopped_at_s=None if out_of_band else st.speculative_user_speech_stopped_at_s,
+            turn_id=None if out_of_band or turn_independent else st.speculative_user_turn_id,
+            turn_revision=None if out_of_band or turn_independent else st.speculative_user_turn_revision,
+            speech_stopped_at_s=None if out_of_band or turn_independent else st.speculative_user_speech_stopped_at_s,
         )
         if not out_of_band:
             self._service.bind_response_latency_tracker(

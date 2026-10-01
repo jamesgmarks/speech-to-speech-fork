@@ -84,6 +84,7 @@ flowchart LR
 | `conversation.item.input_audio_transcription.delta` | Incremental transcript text for the active input-audio content part (when live transcription is enabled). |
 | `conversation.item.input_audio_transcription.completed` | Final transcript for the user turn (with duration usage). |
 | `speech_to_speech.input_audio_transcription.snapshot` | Cumulative, replaceable speculative transcript hypothesis for the active input item (opt-in via `session.extensions`). |
+| `speech_to_speech.agent.background` | Session-local Claude worker update: `job_id`, `status` (`running`, `completed`, `failed`, `cancelled`), `description`, and `result`. Independent of foreground response lifecycle. |
 | `response.created` | Emitted when an explicit response is accepted or before the first implicit text, tool, audio, or terminal event (response is `in_progress`). |
 | `response.output_audio.delta` | Base64 PCM audio chunk from TTS. |
 | `response.output_audio.done` | Audio stream complete for the current output item. |
@@ -91,6 +92,21 @@ flowchart LR
 | `response.output_audio_transcript.done` | Full assistant transcript, emitted once when the output item closes. On cancellation, it contains the accumulated partial transcript. |
 | `response.function_call_arguments.done` | Tool call with `call_id`, `name`, and JSON `arguments`. |
 | `response.done` | Response finished (`completed`, `cancelled` with reason `turn_detected` or `client_cancelled`). |
+
+Background job results enter a retained delivery queue. The server announces
+their status immediately, then creates a normal assistant response once no
+foreground response, user speech/transcription, or permission prompt is active.
+The response has `metadata.background_job_id` and uses the ordinary transcript
+and TTS events. A completion does not inherit the source turn's speculative
+revision. Interrupted delivery remains queued until the next foreground turn
+completes; successful delivery removes it, and duplicate terminal SDK updates
+cannot announce it again. Job and permission events are tied to their owning
+runtime session so late output cannot reach a different client that subsequently
+claims the same pipeline.
+
+Background permissions retain the usual `speech_to_speech.agent.permission.*`
+request/reply and spoken approval flow, with no foreground `response_id`.
+Foreground prompts continue to expire with their response.
 
 ### Official Agents SDK compatibility
 

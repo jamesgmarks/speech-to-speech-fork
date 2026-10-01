@@ -13,6 +13,7 @@ import numpy as np
 from openai.types.responses.response_function_tool_call import ResponseFunctionToolCall
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from speech_to_speech.api.openai_realtime.runtime_config import RuntimeConfig
 from speech_to_speech.pipeline.messages import (
     AssistantOutputPart,
     AssistantToolCallPart,
@@ -216,3 +217,20 @@ class AgentPermissionEvent(PipelineEvent):
     turn_revision: int | None = None
     event: BaseModel
     response_key: str = Field(exclude=True)
+    runtime_config: RuntimeConfig | None = Field(default=None, exclude=True)
+
+
+class AgentBackgroundEvent(PipelineEvent):
+    """A durable agent job update independent of the foreground voice turn.
+
+    The runtime-config identity binds late worker output to its owning session,
+    even after the pipeline has been claimed by a different client.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    type: Literal["agent_background"] = "agent_background"
+    job_id: str
+    status: Literal["running", "completed", "failed", "cancelled"]
+    description: str = ""
+    result: str = ""
+    runtime_config: RuntimeConfig = Field(exclude=True)

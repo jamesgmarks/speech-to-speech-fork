@@ -48,6 +48,22 @@ class ClaudeAgentSDKArguments(LanguageModelBaseArguments):
             "help": "Generation deadline including CLI startup and tools, excluding human permission wait. Timeout interrupts the SDK."
         },
     )
+    claude_agent_background_timeout_s: float = field(
+        default=1800.0,
+        metadata={
+            "help": "Deadline for retained background SDK jobs after the voice response ends, excluding permission wait."
+        },
+    )
+    claude_agent_max_background_sessions: int = field(
+        default=4,
+        metadata={"help": "Maximum simultaneous SDK clients owning native background jobs per connected call."},
+    )
+    claude_agent_orchestrator: bool = field(
+        default=True,
+        metadata={
+            "help": "Prompt Claude to delegate substantial work in the background while keeping voice turns short. All native tools stay enabled."
+        },
+    )
     claude_agent_max_retries: Optional[int] = field(
         default=None,
         metadata={

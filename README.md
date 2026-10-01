@@ -627,6 +627,9 @@ that behavior is intended.
 | `--claude_agent_max_turns` | Limit agentic model turns per voice response; unset uses the SDK default. |
 | `--claude_agent_max_budget_usd` | Optional SDK spending limit per voice response. |
 | `--claude_agent_request_timeout_s` | Generation deadline including startup and tools, excluding human permission wait; default 120 seconds. |
+| `--claude_agent_background_timeout_s` | Deadline for native jobs after the foreground voice response ends, excluding permission wait; default 1800 seconds. |
+| `--claude_agent_max_background_sessions` | Concurrent SDK clients retained for native background jobs per call; default 4. |
+| `--claude_agent_orchestrator false` | Disable the prompt preference for delegating substantive work. Background completion handling and all native tools remain available. |
 | `--claude_agent_permission_timeout_s` | Time to answer each permission prompt or agent question; default 300 seconds. |
 | `--claude_agent_max_retries` | Retry limit for provider failures; unset uses Claude Code's default. |
 | `--claude_agent_stream false` | Buffer output instead of streaming; default is streaming. |
@@ -647,7 +650,22 @@ The adapter supplies the current pipeline conversation as a JSON transcript to
 a fresh SDK client for each response. This preserves edited history,
 out-of-band contexts, and cancellation rollback without leaking CLI sessions
 between callers. It adds CLI startup overhead and retains assistant text, not
-the SDK's internal tool transcript, across voice turns. Unclaimed hidden
+the SDK's internal tool transcript, across voice turns. Native background jobs
+retain their own connected SDK clients and tool context after a foreground
+response ends. Their SDK task lifecycle is tracked independently: new voice
+turns and speech interruptions leave those workers running. Actual worker
+findings are delivered automatically as an ordinary assistant chat and speech
+response when the conversation is idle, and become part of subsequent app
+history. Permission requests remain answerable in the UI or by voice after the
+originating response finishes. Worker timeout or failure is also reported.
+Jobs are scoped to the connected call; disconnecting the call stops its clients
+and jobs, so they are not persisted across reconnects or application restarts.
+
+By default Claude receives a voice-orchestrator prompt that favors starting
+substantial investigations and implementation with `Agent(run_in_background=true)`
+and acknowledging briefly, keeping the voice loop free for conversation. The
+prompt does not restrict tools or guarantee that the model delegates every
+request. Unclaimed hidden
 response prefetch is skipped so tools only run for a public response. History
 uses ordinary bounded trimming by default; `--compact_history true` adds
 separate summarization requests. See the

@@ -34,6 +34,8 @@ from speech_to_speech.api.openai_realtime.transports import (
 )
 from speech_to_speech.pipeline.control import SESSION_END, PipelineControlMessage, is_control_message
 from speech_to_speech.pipeline.events import (
+    AgentBackgroundEvent,
+    AgentPermissionEvent,
     AssistantOutputEvent,
     AssistantResponseDoneEvent,
     AssistantToolCallReadyEvent,
@@ -98,6 +100,8 @@ def _keep_user_text_event(item: Any) -> bool:
     return isinstance(
         item,
         (
+            AgentBackgroundEvent,
+            AgentPermissionEvent,
             SpeechStoppedEvent,
             PartialTranscriptionEvent,
             TranscriptionCompletedEvent,
@@ -958,6 +962,19 @@ def create_app(
                     settled_input = unit.service.audio.resolve_input_terminals(session_id)
                     if settled_input:
                         await transport.send_events(settled_input)
+                    if (
+                        unit.text_output_queue.empty()
+                        and not session.pending_text_output_items
+                        and unit.output_queue.empty()
+                        and session.pending_output_item is None
+                        and not unit.response_playing.is_set()
+                    ):
+                        background_response = unit.service.maybe_start_background_delivery(session_id)
+                        if background_response is not None:
+                            unit.cancel_scope.new_response()
+                            response_key = unit.service._state(session_id).current_response_key
+                            await transport.send_events([background_response])
+                            unit.service.response.mark_response_created_sent(session_id, response_key)
 
                 try:
                     if session is not None and session.pending_output_item is not None:

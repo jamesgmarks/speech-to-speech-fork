@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("claude_agent_sdk")
 from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUseBlock
-from claude_agent_sdk.types import StreamEvent
+from claude_agent_sdk.types import StreamEvent, SystemMessage
 from openai.types.realtime.realtime_response_create_params import RealtimeResponseCreateParams
 from openai.types.realtime.realtime_session_create_request import RealtimeSessionCreateRequest
 
@@ -93,6 +93,10 @@ class FakeClient:
             yield message
         if self.stall:
             await asyncio.Event().wait()
+
+    async def receive_messages(self):
+        async for message in self.receive_response():
+            yield message
 
 
 @pytest.fixture(autouse=True)
@@ -416,3 +420,265 @@ def test_cancel_while_waiting_for_approval_does_not_allow_the_tool():
     assert not req.runtime_config.agent_interactions.pending()
     assert req.runtime_config.agent_interactions.respond(prompt.event.request_id, "allow")
     assert isinstance(outputs[-1], EndOfResponse)
+
+
+class DelayedWorkerClient(FakeClient):
+    release = Event()
+    worker_permission = False
+    terminal_patch = False
+
+    async def receive_messages(self):
+        if self is not self.instances[0]:
+            async for message in super().receive_messages():
+                yield message
+            return
+        yield SystemMessage(
+            subtype="task_started",
+            data={
+                "task_id": "worker-1",
+                "description": "Inspect the architecture",
+                "tool_use_id": "spawn-1",
+            },
+        )
+        yield delta("I've started the investigation.")
+        yield AssistantMessage(content=[TextBlock(text="I've started the investigation.")], model="sonnet")
+        yield result()
+        while not self.release.is_set():
+            await asyncio.sleep(0.01)
+        if self.worker_permission:
+            from types import SimpleNamespace
+
+            self.__class__.permission_result = await self.options.can_use_tool(
+                "Read", {"file_path": "README.md"}, SimpleNamespace()
+            )
+        if self.terminal_patch:
+            yield SystemMessage(subtype="task_updated", data={"task_id": "worker-1", "patch": {"status": "completed"}})
+            yield AssistantMessage(
+                content=[TextBlock(text="The pipeline uses a bounded background queue.")], model="sonnet"
+            )
+            yield result()
+        else:
+            yield AssistantMessage(
+                content=[TextBlock(text="The pipeline uses a bounded background queue.")],
+                model="sonnet",
+                parent_tool_use_id="spawn-1",
+            )
+            yield SystemMessage(
+                subtype="task_notification",
+                data={
+                    "task_id": "worker-1",
+                    "status": "completed",
+                    "summary": "Investigation completed",
+                    "output_file": "",
+                },
+            )
+
+
+def delayed_sdk(monkeypatch):
+    DelayedWorkerClient.release = Event()
+    DelayedWorkerClient.worker_permission = False
+    DelayedWorkerClient.terminal_patch = False
+    monkeypatch.setattr(adapter, "ClaudeSDKClient", DelayedWorkerClient)
+
+
+@pytest.mark.parametrize("terminal_patch", [False, True])
+def test_background_worker_survives_foreground_and_intervening_turn(monkeypatch, terminal_patch):
+    delayed_sdk(monkeypatch)
+    DelayedWorkerClient.terminal_patch = terminal_patch
+    events = Queue()
+    scope = CancelScope()
+    h = handler(text_output_queue=events, cancel_scope=scope)
+    req = request()
+    try:
+        outputs = list(h.process(req))
+        assert text(outputs) == "I've started the investigation."
+        assert outputs[-1].error is None
+        first = FakeClient.instances[0]
+        assert not first.disconnected
+        started = events.get(timeout=1)
+        assert started.status == "running"
+        assert started.runtime_config is req.runtime_config
+        # A spoken interruption or a new voice turn must not close this owner.
+        scope.cancel()
+        scope.new_response()
+        second = request(chat=req.runtime_config.chat)
+        assert text(list(h.process(second))) == "Hello."
+        assert not first.interrupted
+        assert not first.disconnected
+        DelayedWorkerClient.release.set()
+        completed = events.get(timeout=1)
+        assert completed.status == "completed"
+        assert completed.result == "The pipeline uses a bounded background queue."
+        assert completed.runtime_config is req.runtime_config
+    finally:
+        h.cleanup()
+    assert first.disconnected
+
+
+def test_background_permission_remains_answerable_after_speech_cancel(monkeypatch):
+    delayed_sdk(monkeypatch)
+    DelayedWorkerClient.worker_permission = True
+    events = Queue()
+    scope = CancelScope()
+    h = handler(text_output_queue=events, cancel_scope=scope)
+    req = request()
+    try:
+        list(h.process(req))
+        assert events.get(timeout=1).status == "running"
+        scope.cancel()
+        DelayedWorkerClient.release.set()
+        prompt = events.get(timeout=1)
+        assert prompt.response_key.startswith("background:")
+        assert prompt.runtime_config is req.runtime_config
+        assert prompt.turn_id is None
+        assert req.runtime_config.agent_interactions.respond(prompt.event.request_id, "allow") is None
+        assert events.get(timeout=1).event.status == "allowed"
+        assert events.get(timeout=1).status == "completed"
+        assert DelayedWorkerClient.permission_result.behavior == "allow"
+    finally:
+        h.cleanup()
+
+
+def test_call_teardown_stops_native_background_owner(monkeypatch):
+    delayed_sdk(monkeypatch)
+    events = Queue()
+    h = handler(text_output_queue=events)
+    req = request()
+    list(h.process(req))
+    owner = FakeClient.instances[0]
+    assert events.get(timeout=1).status == "running"
+    h.on_session_end()
+    assert owner.interrupted
+    assert owner.disconnected
+    assert not req.runtime_config.agent_interactions.pending()
+    assert events.empty()
+
+
+def test_background_timeout_reports_failure_without_blocking_next_turn(monkeypatch):
+    delayed_sdk(monkeypatch)
+    events = Queue()
+    h = handler(text_output_queue=events, background_timeout_s=0.1)
+    try:
+        outputs = list(h.process(request()))
+        assert outputs[-1].error is None
+        assert events.get(timeout=1).status == "running"
+        failure = events.get(timeout=1)
+        assert failure.status == "failed"
+        assert "timed out" in failure.result
+        assert text(list(h.process(request()))) == "Hello."
+    finally:
+        h.cleanup()
+
+
+def test_native_agent_jsonl_output_exposes_only_final_assistant_text(tmp_path):
+    from speech_to_speech.LLM.claude_background import _task_output
+
+    output = tmp_path / "job.output"
+    output.write_text(
+        "\n".join(
+            json.dumps(frame)
+            for frame in [
+                {"message": {"role": "user", "content": "Hidden worker prompt"}},
+                {"message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "Hidden"}]}},
+                {"message": {"role": "assistant", "content": [{"type": "tool_use", "input": {"secret": "Hidden"}}]}},
+                {"message": {"role": "assistant", "content": [{"type": "text", "text": "The actual findings."}]}},
+            ]
+        )
+    )
+    assert _task_output(str(output)) == "The actual findings."
+
+
+def test_native_command_output_is_bounded(tmp_path):
+    from speech_to_speech.LLM.claude_background import _task_output
+
+    output = tmp_path / "job.output"
+    output.write_text("x" * 100000 + "\nCommand finished successfully.")
+    extracted = _task_output(str(output))
+    assert len(extracted) == 32768
+    assert extracted.endswith("Command finished successfully.")
+
+
+def test_duplicate_terminal_patch_then_notification_keeps_actual_findings(monkeypatch):
+    delayed_sdk(monkeypatch)
+
+    class PatchFirstClient(DelayedWorkerClient):
+        async def receive_messages(self):
+            async for message in super().receive_messages():
+                if isinstance(message, AssistantMessage) and message.parent_tool_use_id == "spawn-1":
+                    yield SystemMessage(
+                        subtype="task_updated",
+                        data={
+                            "task_id": "worker-1",
+                            "patch": {"status": "completed"},
+                        },
+                    )
+                yield message
+
+    monkeypatch.setattr(adapter, "ClaudeSDKClient", PatchFirstClient)
+    events = Queue()
+    h = handler(text_output_queue=events)
+    try:
+        list(h.process(request()))
+        assert events.get(timeout=1).status == "running"
+        DelayedWorkerClient.release.set()
+        completed = events.get(timeout=1)
+        assert completed.status == "completed"
+        assert completed.result == "The pipeline uses a bounded background queue."
+    finally:
+        h.cleanup()
+    assert events.empty()
+
+
+def test_native_json_command_output_is_not_mistaken_for_agent_transcript(tmp_path):
+    from speech_to_speech.LLM.claude_background import _task_output
+
+    output = tmp_path / "job.output"
+    output.write_text('{"passed": 4, "failed": 0}')
+    assert _task_output(str(output)) == '{"passed": 4, "failed": 0}'
+
+
+def test_workers_nested_background_command_is_not_an_independent_announcement(monkeypatch):
+    delayed_sdk(monkeypatch)
+
+    class NestedCommandClient(DelayedWorkerClient):
+        async def receive_messages(self):
+            async for message in super().receive_messages():
+                if isinstance(message, AssistantMessage) and message.parent_tool_use_id == "spawn-1":
+                    yield AssistantMessage(
+                        content=[ToolUseBlock(id="nested-command", name="Bash", input={"command": "sleep 5"})],
+                        model="sonnet",
+                        parent_tool_use_id="spawn-1",
+                    )
+                    yield SystemMessage(
+                        subtype="task_started",
+                        data={
+                            "task_id": "inner-command",
+                            "description": "Wait five seconds",
+                            "tool_use_id": "nested-command",
+                        },
+                    )
+                    yield SystemMessage(
+                        subtype="task_notification",
+                        data={
+                            "task_id": "inner-command",
+                            "status": "completed",
+                            "summary": "Command done",
+                            "output_file": "",
+                        },
+                    )
+                yield message
+
+    monkeypatch.setattr(adapter, "ClaudeSDKClient", NestedCommandClient)
+    events = Queue()
+    h = handler(text_output_queue=events)
+    try:
+        list(h.process(request()))
+        assert events.get(timeout=1).status == "running"
+        DelayedWorkerClient.release.set()
+        completed = events.get(timeout=1)
+        assert completed.job_id == "worker-1"
+        assert completed.status == "completed"
+        assert completed.result == "The pipeline uses a bounded background queue."
+    finally:
+        h.cleanup()
+    assert events.empty()

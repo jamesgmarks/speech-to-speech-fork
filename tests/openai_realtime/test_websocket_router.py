@@ -25,6 +25,7 @@ from speech_to_speech.LLM.lm_output_processor import LMOutputProcessor
 from speech_to_speech.pipeline.cancel_scope import CancelScope
 from speech_to_speech.pipeline.control import SESSION_END, PipelineControlMessage, is_control_message
 from speech_to_speech.pipeline.events import (
+    AgentBackgroundEvent,
     AssistantOutputEvent,
     AssistantResponseDoneEvent,
     AssistantToolCallReadyEvent,
@@ -187,6 +188,69 @@ def _simulate_session_end_drain(input_queue: Queue, output_queue: Queue, timeout
 
 def _pcm_bytes(n_samples: int) -> bytes:
     return b"\x00" * (n_samples * 2)
+
+
+def test_background_completion_waits_for_response_then_streams_normally(setup):
+    app, service, _, output_queue, text_output_queue, *_ = setup
+    with TestClient(app) as client:
+        with client.websocket_connect("/v1/realtime") as ws:
+            ws.receive_json()
+            conn_id = service.connection_ids[0]
+            ws.send_json({"type": "response.create"})
+            assert ws.receive_json()["type"] == "response.created"
+            foreground = service.text_prompt_queue.get(timeout=1)
+            cfg = service._state(conn_id).runtime_config
+            text_output_queue.put(
+                AgentBackgroundEvent(
+                    runtime_config=cfg, job_id="worker-1", status="completed", result="Found the cause."
+                )
+            )
+            assert ws.receive_json()["type"] == "speech_to_speech.agent.background"
+            assert service.text_prompt_queue.empty()
+            output_queue.put(AudioOutput(audio=AUDIO_RESPONSE_DONE, response_key=foreground.response_key))
+            assert ws.receive_json()["type"] == "response.done"
+            created = ws.receive_json()
+            assert created["type"] == "response.created"
+            assert created["response"]["metadata"] == {"background_job_id": "worker-1"}
+            delivery = service.text_prompt_queue.get(timeout=1)
+            output_queue.put(AssistantOutputEvent(response_key=delivery.response_key, text="Found the cause."))
+            output_queue.put(AudioOutput(audio=_pcm_bytes(512), response_key=delivery.response_key))
+            output_queue.put(AudioOutput(audio=AUDIO_RESPONSE_DONE, response_key=delivery.response_key))
+            events = []
+            while not events or events[-1]["type"] != "response.done":
+                events.append(ws.receive_json())
+            assert "response.output_audio.delta" in [event["type"] for event in events]
+            assert events[-1]["response"]["status"] == "completed"
+            assert not service._state(conn_id).background_delivery_queue
+
+
+def test_background_completion_survives_foreground_cancel_flush(setup):
+    app, service, _, _, text_output_queue, *_ = setup
+    with TestClient(app) as client:
+        with client.websocket_connect("/v1/realtime") as ws:
+            ws.receive_json()
+            conn_id = service.connection_ids[0]
+            ws.send_json({"type": "response.create"})
+            assert ws.receive_json()["type"] == "response.created"
+            service.text_prompt_queue.get(timeout=1)
+            # A completion already queued when cancellation drains side-channel
+            # output must still be delivered to the same connected user.
+            text_output_queue.put(
+                AgentBackgroundEvent(
+                    runtime_config=service._state(conn_id).runtime_config,
+                    job_id="worker-1",
+                    status="completed",
+                    result="Ready.",
+                )
+            )
+            ws.send_json({"type": "response.cancel"})
+            events = []
+            while not events or events[-1]["type"] != "response.created":
+                events.append(ws.receive_json())
+            types = [event["type"] for event in events]
+            assert "speech_to_speech.agent.background" in types
+            assert "response.done" in types
+            assert types.index("response.done") < types.index("response.created")
 
 
 # ===================================================================
