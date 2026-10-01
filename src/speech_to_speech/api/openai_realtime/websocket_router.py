@@ -623,6 +623,25 @@ def create_app(
                 return unit
         return None
 
+    async def _claim_after_disconnect(transport: SessionTransport | None) -> PipelineUnit | None:
+        # A browser can reconnect before SESSION_END has crossed the handler
+        # chain. Wait briefly for already-closing slots; never reuse one before
+        # its old output has drained, and never wait for an active conversation.
+        deadline = time.monotonic() + 2.0
+        while True:
+            unit = _claim_unit(transport)
+            if unit is not None:
+                return unit
+            closing = any(
+                unit.session is not None
+                and unit.session.released_at is not None
+                and unit.session.quarantined_at is None
+                for unit in pool
+            )
+            if not closing or stop_event.is_set() or time.monotonic() >= deadline:
+                return None
+            await asyncio.sleep(0.05)
+
     @app.websocket("/v1/realtime")
     async def realtime_endpoint(ws: WebSocket) -> None:
         offered_subprotocols = {
@@ -631,7 +650,7 @@ def create_app(
         await ws.accept(subprotocol="realtime" if "realtime" in offered_subprotocols else None)
 
         transport = WebSocketTransport(ws)
-        unit = _claim_unit(transport)
+        unit = await _claim_after_disconnect(transport)
         if unit is None:
             logger.warning(f"Rejected connection: all {len(pool)} pipeline slots in use")
             # Stateless error event — rejection is not chargeable to any unit's usage metrics.
@@ -777,7 +796,7 @@ def create_app(
 
         # Claim with a placeholder transport; the send loop tolerates a
         # transport-less snapshot until the session object below is attached.
-        unit = _claim_unit(None)
+        unit = await _claim_after_disconnect(None)
         if unit is None:
             logger.warning(f"Rejected WebRTC offer: all {len(pool)} pipeline slots in use")
             return Response(

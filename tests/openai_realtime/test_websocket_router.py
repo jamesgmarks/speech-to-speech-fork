@@ -11,6 +11,7 @@ import base64
 import time
 from queue import Empty, Queue
 from threading import Event as ThreadingEvent
+from threading import Thread
 
 import numpy as np
 import pytest
@@ -188,6 +189,31 @@ def _simulate_session_end_drain(input_queue: Queue, output_queue: Queue, timeout
 
 def _pcm_bytes(n_samples: int) -> bytes:
     return b"\x00" * (n_samples * 2)
+
+
+def test_immediate_reconnect_waits_for_disconnected_pipeline_to_drain(setup):
+    app, service, input_queue, output_queue, *_ = setup
+    with TestClient(app) as client:
+        with client.websocket_connect("/v1/realtime") as first:
+            old_id = first.receive_json()["session"]["id"]
+
+        def delayed_drain():
+            time.sleep(0.2)
+            _simulate_session_end_drain(input_queue, output_queue)
+
+        drain = Thread(target=delayed_drain)
+        drain.start()
+        started = time.monotonic()
+        try:
+            with client.websocket_connect("/v1/realtime") as second:
+                created = second.receive_json()
+                assert created["type"] == "session.created"
+                assert created["session"]["id"] != old_id
+                assert old_id not in service.connection_ids
+                assert time.monotonic() - started >= 0.2
+        finally:
+            drain.join(timeout=2)
+        _simulate_session_end_drain(input_queue, output_queue)
 
 
 def test_background_completion_waits_for_response_then_streams_normally(setup):
