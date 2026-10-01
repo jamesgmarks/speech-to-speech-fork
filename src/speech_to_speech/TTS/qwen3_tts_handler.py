@@ -42,6 +42,7 @@ from speech_to_speech.pipeline.transcript_logging import log_exception
 from speech_to_speech.pipeline.turn_latency import active_turn_latency_tracker, bind_active_turn_latency_tracker
 from speech_to_speech.TTS.voice_profiles import load_voice_profiles
 from speech_to_speech.utils.mlx_lock import MLXLockContext
+from speech_to_speech.utils.mlx_sampling import seeded_mlx_sampling
 from speech_to_speech.utils.utils import resolve_device
 
 logger = logging.getLogger(__name__)
@@ -223,6 +224,12 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         self._initial_ref_spk = self.ref_spk
         self._initial_ref_rvq = self.ref_rvq
         self._initial_ref_text = self.ref_text
+        initial_audio = self._resolve_audio_path(self.ref_audio) if self.ref_audio else None
+        self._initial_voice_profile = next(
+            (p for p in self.voice_profiles.values() if p.ref_audio == initial_audio and p.ref_text == self.ref_text),
+            None,
+        )
+        self._active_voice_profile = self._initial_voice_profile
         if self.voice_profiles and self._model_type() != "base":
             raise ValueError("qwen3_tts_voice_profiles requires a Qwen3-TTS Base voice-cloning model.")
 
@@ -561,6 +568,7 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
 
         profile = getattr(self, "voice_profiles", {}).get(session_voice)
         if profile is not None:
+            self._active_voice_profile = profile
             if self.ref_audio != profile.ref_audio or self.ref_text != profile.ref_text:
                 self.ref_audio, self.ref_text = profile.ref_audio, profile.ref_text
                 self._clear_cached_voice_reference()
@@ -586,11 +594,13 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
                 session_voice = speaker
 
             self.speaker = session_voice
+            self._active_voice_profile = None
             self.ref_audio = None
             self._clear_cached_voice_reference()
             return
 
         if self._resolve_audio_path(session_voice) is not None:
+            self._active_voice_profile = None
             self.ref_audio = session_voice
             self._clear_cached_voice_reference()
             return
@@ -917,6 +927,9 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         self._apply_session_voice_override(model_type, runtime_config, response)
 
         request_language = self._language_for_utterance(language_code, tts_input.selected_language)
+        profile = getattr(self, "_active_voice_profile", None)
+        if request_language == "auto" and profile is not None and profile.language:
+            request_language = profile.language
 
         console.print(f"[green]ASSISTANT: {text}")
 
@@ -983,16 +996,22 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         with MLXLockContext(handler_name="Qwen3TTS", timeout=10.0) as acquired:
             if not acquired:
                 raise TimeoutError("Timed out waiting for MLX lock")
-            yield from self._stream(
-                generation_fn(
-                    **self._mlx_stream_kwargs(max_tokens=max_tokens),
-                    **generation_kwargs,
-                ),
-                label=label,
-            )
+            profile = getattr(self, "_active_voice_profile", None)
+            seed = profile.seed if profile is not None else None
+            with seeded_mlx_sampling(generation_fn, seed):
+                yield from self._stream(
+                    generation_fn(
+                        **self._mlx_stream_kwargs(max_tokens=max_tokens),
+                        **generation_kwargs,
+                    ),
+                    label=label,
+                )
 
     def _process_voice_clone(self, text: str, language: str | None = None) -> Iterator[bytes | np.ndarray]:
         language = language or self.language
+        profile = getattr(self, "_active_voice_profile", None)
+        if language == "auto" and profile is not None and profile.language:
+            language = profile.language
         utterance_max_new_tokens = self._estimate_max_new_tokens(text)
         if self.backend == "mlx":
             if self.xvec_only:
@@ -1095,6 +1114,7 @@ class Qwen3TTSHandler(BaseHandler[TTSIn, TTSOut]):
         self.ref_spk = self._initial_ref_spk
         self.ref_rvq = self._initial_ref_rvq
         self.ref_text = self._initial_ref_text
+        self._active_voice_profile = getattr(self, "_initial_voice_profile", None)
         logger.debug("Qwen3-TTS session state reset")
 
     def cleanup(self) -> None:

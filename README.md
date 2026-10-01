@@ -337,6 +337,13 @@ labels; selecting a profile switches both audio and transcript and resets
 cached speaker references. Click **Save** to use it for upcoming speech;
 the selection persists across browser reloads.
 
+Profiles may also specify `"language": "english"` as the fallback when TTS
+language is `auto`, and `"seed": 42` for repeatable MLX sampling. Explicit
+language selection still takes precedence. These settings follow the selected
+voice and reset when switching voices or ending a session. A seed reproduces
+the same sampling for the same text and generation conditions; new text still
+produces new speech.
+
 The selector lists voices supported by the loaded model: reference profiles
 for Base, preset speakers for CustomVoice. These model variants have different
 voice capabilities. `GET /v1/voices` returns the available choices and default.

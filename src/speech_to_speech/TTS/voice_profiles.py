@@ -21,6 +21,23 @@ class _ProfileSpec(BaseModel):
     name: str = Field(min_length=1)
     ref_audio: str = Field(min_length=1)
     ref_text_file: str = Field(min_length=1)
+    seed: int | None = Field(default=None, ge=0, le=4294967295)
+    language: (
+        Literal[
+            "auto",
+            "english",
+            "chinese",
+            "japanese",
+            "korean",
+            "french",
+            "german",
+            "russian",
+            "portuguese",
+            "spanish",
+            "italian",
+        ]
+        | None
+    ) = None
 
 
 @dataclass(frozen=True)
@@ -29,6 +46,8 @@ class VoiceProfile:
     name: str
     ref_audio: Path
     ref_text: str
+    seed: int | None = None
+    language: str | None = None
 
 
 def load_voice_profiles(manifest: str | Path | None) -> dict[str, VoiceProfile]:
@@ -49,5 +68,5 @@ def load_voice_profiles(manifest: str | Path | None) -> dict[str, VoiceProfile]:
         transcript = (path.parent / Path(spec.ref_text_file).expanduser()).read_text(encoding="utf-8").strip()
         if not transcript or not spec.name.strip():
             raise ValueError(f"Voice profile {spec.id} needs a name and nonempty reference transcript.")
-        profiles[spec.id] = VoiceProfile(spec.id, spec.name.strip(), audio, transcript)
+        profiles[spec.id] = VoiceProfile(spec.id, spec.name.strip(), audio, transcript, spec.seed, spec.language)
     return profiles

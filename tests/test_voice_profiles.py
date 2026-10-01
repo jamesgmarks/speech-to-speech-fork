@@ -1,7 +1,8 @@
 import json
+import sys
 from pathlib import Path
 from threading import Event
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -144,3 +145,69 @@ def test_generation_receives_each_selected_reference_and_transcript(handler, mon
         name = voice.removeprefix("custom:")
         assert Path(captured[-1]["ref_audio"]).name == f"{name}.wav"
         assert captured[-1]["ref_text"] == f"Transcript for {name}."
+
+
+def test_profile_generation_settings_are_scoped_and_restore_with_voice_switch(handler, manifest, monkeypatch):
+    entries = json.loads(manifest.read_text())
+    entries[1].update(seed=42, language="english")
+    manifest.write_text(json.dumps(entries))
+    handler.voice_profiles = load_voice_profiles(manifest)
+    captured = []
+    handler.model.generate = lambda **kwargs: iter(())
+    monkeypatch.setattr(handler, "_prepare_mlx_ref_audio", lambda path: str(path))
+    monkeypatch.setattr(handler, "_stream_mlx_generation", lambda fn, **kwargs: (captured.append(kwargs), iter(()))[1])
+    handler._apply_session_voice_override("base", config("custom:pepper"))
+    list(handler._process_voice_clone("Hello Amir.", "auto"))
+    assert captured[-1]["lang_code"] == "english"
+    assert handler._active_voice_profile.seed == 42
+    # An explicitly selected language takes precedence over a profile fallback.
+    list(handler._process_voice_clone("Bonjour.", "french"))
+    assert captured[-1]["lang_code"] == "french"
+    handler._apply_session_voice_override("base", config("custom:james"))
+    list(handler._process_voice_clone("Hello.", "auto"))
+    assert captured[-1]["lang_code"] == "auto"
+    assert handler._active_voice_profile.seed is None
+    handler._apply_session_voice_override("base", config("custom:pepper"))
+    handler.on_session_end()
+    assert handler._active_voice_profile.id == "custom:james"
+
+
+def test_seed_is_set_inside_mlx_lock_before_generation(handler, monkeypatch):
+    calls = []
+    handler._active_voice_profile = SimpleNamespace(id="custom:pepper", seed=42)
+
+    class Lock:
+        def __init__(self, **kwargs):
+            pass
+
+        def __enter__(self):
+            calls.append("lock")
+            return True
+
+        def __exit__(self, *args):
+            calls.append("unlock")
+
+    fake_mlx = ModuleType("mlx")
+    fake_mx = ModuleType("mlx.core")
+    fake_mx.random = SimpleNamespace(seed=lambda seed: calls.append(("seed", seed)))
+    fake_mlx.core = fake_mx
+    monkeypatch.setitem(sys.modules, "mlx", fake_mlx)
+    monkeypatch.setitem(sys.modules, "mlx.core", fake_mx)
+    monkeypatch.setattr("speech_to_speech.TTS.qwen3_tts_handler.MLXLockContext", Lock)
+    monkeypatch.setattr(handler, "_stream", lambda gen, label: gen)
+
+    def generate(**kwargs):
+        calls.append("generate")
+        return iter(())
+
+    list(handler._stream_mlx_generation(generate, "test", 360))
+    assert calls == ["lock", ("seed", 42), "generate", "unlock"]
+
+
+@pytest.mark.parametrize("settings", [{"seed": -1}, {"seed": 4294967296}, {"language": "unknown"}])
+def test_manifest_rejects_invalid_generation_settings(manifest, settings):
+    entries = json.loads(manifest.read_text())
+    entries[0].update(settings)
+    manifest.write_text(json.dumps(entries))
+    with pytest.raises(ValueError):
+        load_voice_profiles(manifest)
