@@ -1,0 +1,87 @@
+{
+  "sample_rate": 24000,
+  "gap_seconds": 0.2,
+  "edge_fade_ms": 6,
+  "segments": [
+    {
+      "id": "plans-fact",
+      "source": "plans",
+      "start": 1.18,
+      "end": 2.4,
+      "text": "As a matter of fact, I do."
+    },
+    {
+      "id": "plans-birthday",
+      "source": "plans",
+      "start": 3.84,
+      "end": 5.89,
+      "text": "I'm allowed to have plans on my birthday."
+    },
+    {
+      "id": "plans-yes",
+      "source": "plans",
+      "start": 6.98,
+      "end": 7.6,
+      "text": "Yes."
+    },
+    {
+      "id": "plans-last-year",
+      "source": "plans",
+      "start": 9.0,
+      "end": 12.55,
+      "text": "Yeah, isn't that strange? It's the same day as last year."
+    },
+    {
+      "id": "plans-already",
+      "source": "plans",
+      "start": 15.1,
+      "end": 16.4,
+      "text": "I already did."
+    },
+    {
+      "id": "plans-gift",
+      "source": "plans",
+      "start": 17.2,
+      "end": 22.65,
+      "text": "Oh, it was very nice. Very tasteful. Thank you, Mr. Stark."
+    },
+    {
+      "id": "olives",
+      "source": "olives",
+      "start": 0.04,
+      "end": 8.33,
+      "text": "I would like a, a vodka martini, please. Very dry with olives. A lot of olives. Like at least three olives."
+    },
+    {
+      "id": "trash-clothes",
+      "source": "trash",
+      "start": 0.04,
+      "end": 7.05,
+      "text": "I've got your clothes here. They've been dry cleaned and pressed, and there's a car waiting for you outside that will take you anywhere you'd like to go."
+    },
+    {
+      "id": "trash-indeed",
+      "source": "trash",
+      "start": 9.8,
+      "end": 11.45,
+      "text": "Indeed I am."
+    },
+    {
+      "id": "trash-requires",
+      "source": "trash",
+      "start": 16.2,
+      "end": 23.85,
+      "text": "I do anything and everything that Mr. Stark requires, including occasionally taking out the trash. Will that be all?"
+    }
+  ],
+  "reference_order": [
+    "trash-clothes",
+    "trash-requires",
+    "olives"
+  ],
+  "note": "Speaker attribution from the supplied dialogue screenshots; boundaries from local Parakeet word timing. Short stutter in olives is retained in the reference transcript.",
+  "upbeat_reference_order": [
+    "plans-last-year",
+    "plans-gift"
+  ]
+}

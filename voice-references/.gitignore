@@ -1,0 +1,9 @@
+# Keep recordings, transcripts, generated audio, reports, and denoising work local.
+*
+!*/
+!.gitignore
+!*.py
+!*.md
+!voices.json
+!segments.json
+work/
