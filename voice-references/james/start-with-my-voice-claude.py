@@ -26,7 +26,7 @@ command = [
     "--claude_agent_max_retries",
     "1",
     "--stream_batch_sentences",
-    "1",
+    "3",
     "--qwen3_tts_model_name",
     str(Path.home() / ".cache/speech-to-speech/qwen3-tts-base-6bit"),
     "--qwen3_tts_mlx_quantization",

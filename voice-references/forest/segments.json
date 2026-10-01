@@ -52,5 +52,16 @@
     "rocks",
     "love"
   ],
-  "note": "Speaker attribution and transcripts from the supplied screenshot, checked with local Parakeet alignment. Gump is corrected from the ASR's Gum. The shoes excerpt ends after its first complete sentence; the later clause is excluded. The shorter greeting is kept in all-forrest-excerpts as an alternative to the longer introduction."
+  "note": "The default retains the combined four-scene reference that the user preferred in the single-synthesis comparison. The continuous love-only clip is kept as reference-single-clip for comparison. Source clips and cuts are preserved; transcripts come from the supplied screenshot with local Parakeet alignment checks.",
+  "comparison_reference_orders": {
+    "reference-multi-scene": [
+      "people-call-me",
+      "shoes",
+      "rocks",
+      "love"
+    ],
+    "reference-single-clip": [
+      "love"
+    ]
+  }
 }

@@ -16,6 +16,9 @@ Then open the demo, choose **Settings → Voice**, select a voice, and **Save**.
 The setting persists and applies to upcoming speech without a server restart.
 The Pepper launcher starts with Pepper as its default and offers the same
 choices. Only one backend should occupy the realtime port at a time.
+Claude launchers group up to three sentences per speech generation to reduce
+voice and level changes between separate performances. For minimum startup
+latency, append `--stream_batch_sentences 1`.
 
 To add a voice, create a directory with its reference audio and exact transcript
 and add an entry to `voices.json`, giving it a unique `custom:` ID. Restart the
