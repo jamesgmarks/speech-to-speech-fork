@@ -45,6 +45,7 @@ import asyncio
 import json
 import logging
 import os
+from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
 
@@ -53,7 +54,7 @@ import httpx
 import limiter
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from static_assets import DemoStaticFiles
 
 logger = logging.getLogger("s2s.search")
@@ -257,6 +258,39 @@ async def agent_sessions():
         return response.json()
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(status_code=502, detail="Session inventory unavailable. Check the speech service.") from exc
+
+
+class SessionPermissionModeChange(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    mode: Literal["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]
+
+
+@app.post("/api/agent-sessions/{session_id}/permission-mode")
+async def session_permission_mode(session_id: str, change: SessionPermissionModeChange, request: Request):
+    origin = request.headers.get("origin")
+    if origin and (urlsplit(origin).scheme, urlsplit(origin).netloc) != (request.url.scheme, request.url.netloc):
+        raise HTTPException(status_code=403, detail="Permission changes require a same-origin request.")
+    if not SPEECH_TO_SPEECH_URL:
+        raise HTTPException(status_code=409, detail="Session controls require a deployment-pinned speech service.")
+    # App-owned IDs are generated locally; do not interpolate an arbitrary path
+    # or accept any target URL from the browser.
+    if not session_id.startswith("peer_") or len(session_id) != 37 or any(c not in "0123456789abcdef" for c in session_id[5:]):
+        raise HTTPException(status_code=400, detail="Choose an app-owned session from the list.")
+    parts = urlsplit(_webrtc_calls_url(SPEECH_TO_SPEECH_URL))
+    path = parts.path.removesuffix("/realtime/calls") + f"/agent/sessions/{session_id}/permission-mode"
+    url = urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as http:
+            response = await http.post(url, json=change.model_dump())
+        if not response.is_success:
+            try:
+                detail = response.json().get("detail", "Permission change failed.")
+            except ValueError:
+                detail = "Permission change failed. Check the speech service."
+            raise HTTPException(status_code=response.status_code, detail=detail)
+        return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail="Permission change unavailable. Refresh to check the session's mode.") from exc
 
 
 @app.get("/api/me")

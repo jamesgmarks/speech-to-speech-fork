@@ -6,9 +6,10 @@ from contextlib import asynccontextmanager
 from queue import Empty, Queue
 from threading import Event as ThreadingEvent
 from typing import Any, Callable, TypeVar, cast
+from urllib.parse import urlsplit
 
 import numpy as np
-from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
 from openai.types.realtime import (
     ConversationItemCreateEvent,
     ConversationItemTruncateEvent,
@@ -20,7 +21,11 @@ from openai.types.realtime import (
     SessionUpdateEvent,
 )
 
-from speech_to_speech.agent_interactions import AgentPermissionModeSet, AgentPermissionReply
+from speech_to_speech.agent_interactions import (
+    AgentPermissionModeSet,
+    AgentPermissionReply,
+    AgentSessionPermissionModeSet,
+)
 from speech_to_speech.agent_session_inventory import AgentSessionInventory
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
@@ -565,6 +570,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if registry is not None and session_handler is not None and hasattr(session_handler, "_create_peer_client"):
+            registry.restore(
+                session_handler._create_peer_client,
+                session_handler.background_timeout_s,
+                session_handler.max_independent_sessions,
+            )
         # One send loop per pipeline unit; each polls its own queues and forwards
         # to the websocket currently attached via unit.session.
         send_tasks = [asyncio.create_task(_send_loop_for(unit)) for unit in pool]
@@ -589,20 +600,47 @@ def create_app(
 
     app = FastAPI(lifespan=lifespan)
 
-    registry = next(
+    session_handler = next(
         (
-            h._peer_sessions
+            h
             for unit in pool
             for h in unit.handlers
             if getattr(h, "session_tools", False) and hasattr(h, "_peer_sessions")
         ),
         None,
     )
+    registry = session_handler._peer_sessions if session_handler is not None else None
     agent_inventory = AgentSessionInventory(registry)
 
     @app.get("/v1/agent/sessions")
     async def agent_sessions_endpoint() -> dict[str, Any]:
         return await agent_inventory.list()
+
+    @app.post("/v1/agent/sessions/{session_id}/permission-mode")
+    async def agent_session_permission_mode(
+        session_id: str, change: AgentSessionPermissionModeSet, request: Request
+    ) -> dict[str, Any]:
+        origin = request.headers.get("origin")
+        if origin and (urlsplit(origin).scheme, urlsplit(origin).netloc) != (request.url.scheme, request.url.netloc):
+            raise HTTPException(status_code=403, detail="Permission changes require a same-origin request.")
+        if registry is None:
+            raise HTTPException(status_code=409, detail="Claude session controls are unavailable for this backend.")
+        try:
+            peer = registry.get(session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="No app-owned Claude session has this ID.") from exc
+        try:
+            return await peer.set_permission_mode(change.mode)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except TimeoutError as exc:
+            raise HTTPException(
+                status_code=504, detail="Claude did not acknowledge the permission change. Refresh to check its mode."
+            ) from exc
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Claude rejected the permission change: {str(exc)[:500]}"
+            ) from exc
 
     llm_proxy_usage = mount_llm_proxy(app, llm_proxy_config)
 

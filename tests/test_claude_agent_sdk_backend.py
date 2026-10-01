@@ -7,6 +7,7 @@ import json
 from queue import Queue
 from threading import Event
 from time import monotonic
+from types import SimpleNamespace
 
 import pytest
 
@@ -815,3 +816,48 @@ async def test_external_send_resolves_native_id_and_requires_native_reply_channe
     denied = await tools["send_external_agent_message"].handler({"target": "James", "message": "Status please."})
     assert denied["isError"] and "Ambiguous" in denied["content"][0]["text"]
     assert peer.send.call_count == 1
+
+
+async def test_new_independent_session_inherits_voice_mode_and_can_switch_to_bypass(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    h = handler(permission_mode="default")
+    req = request()
+    req.runtime_config.agent_permission_mode = "acceptEdits"
+    captured = {}
+
+    def create(name, directory, factory, timeout, limit, *, permission_mode):
+        peer = SimpleNamespace(
+            name=name,
+            directory=directory,
+            permission_mode=permission_mode,
+            native_session_id=None,
+            send=Mock(return_value={"session_id": "peer_test", "status": "queued"}),
+        )
+        captured["client"] = factory(peer)
+        return peer
+
+    h._peer_sessions = SimpleNamespace(create=create)
+    tools = {
+        tool.name: tool for tool in h._independent_session_tools(SimpleNamespace(runtime_config=req.runtime_config))
+    }
+    response = await tools["create_agent_session"].handler(
+        {"name": "worker", "directory": str(tmp_path), "prompt": "Inspect the code"}
+    )
+    assert not response.get("isError")
+    options = captured["client"].options
+    assert options.permission_mode == "acceptEdits"
+    assert options.extra_args == {"name": "worker", "allow-dangerously-skip-permissions": None}
+    assert options.tools == {"type": "preset", "preset": "claude_code"} and options.disallowed_tools == []
+    assert h._sdk_kwargs["permission_mode"] == "default"
+
+
+def test_peer_sessions_do_not_inherit_voice_output_token_cap():
+    h = handler(max_tokens=2048, max_retries=1)
+    options = h._create_peer_client(
+        SimpleNamespace(
+            name="peer", directory="/tmp", native_session_id=None, permission_mode="default", recipient=None
+        )
+    ).options
+    assert options.env == {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "", "CLAUDE_CODE_MAX_RETRIES": "1"}

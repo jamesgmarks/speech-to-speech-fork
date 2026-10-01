@@ -8,12 +8,19 @@ export class AgentSessions {
     this.visible = false;
     this.loading = false;
     this.timer = 0;
+    this.permissionUpdates = new Set();
+    this.permissionSelectionId = null;
+    this.observedPermissionMode = null;
     this.panel = $("#agent-sessions");
     this.list = $("#sessions-list");
     this.status = $("#sessions-status");
     $("#sessions-view").addEventListener("click", () => this.show(true));
     $("#conversation-view").addEventListener("click", () => this.show(false));
     $("#sessions-refresh").addEventListener("click", () => this.refresh());
+    $("#session-permissions-form").addEventListener("submit", event => {
+      event.preventDefault();
+      void this.applyPermissions();
+    });
     new MutationObserver(() => {
       if (!$("#chat-panel").hidden && this.visible) void this.refresh();
     }).observe($("#chat-panel"), { attributes: true, attributeFilter: ["hidden"] });
@@ -67,11 +74,13 @@ export class AgentSessions {
         row.dataset.sessionId = session.session_id;
         row.setAttribute("aria-pressed", String(session.session_id === selectedId));
         const state = String(session.state || "unknown").replaceAll("_", " ");
-        row.innerHTML = `<strong>${escHtml(session.name)}</strong><span class="session-state">${escHtml(state)}${session.queued_messages ? ` · ${Number(session.queued_messages)} queued` : ""}</span><span>${session.source === "app" ? "App session" : "External session"}${session.working_with ? " · Linked to voice agent" : ""}</span><span>${escHtml(session.directory)}</span>${session.latest_reply ? `<pre>${escHtml(session.latest_reply)}</pre>` : ""}${session.error ? `<span>${escHtml(session.error)}</span>` : ""}`;
+        const modeLabel = Array.from($("#session-permission-mode").options).find(option => option.value === session.permission_mode)?.textContent || "Unknown";
+        row.innerHTML = `<strong>${escHtml(session.name)}</strong><span class="session-state">${escHtml(state)}${session.queued_messages ? ` · ${Number(session.queued_messages)} queued` : ""}</span><span>${session.source === "app" ? "App session" : "External session"}${session.working_with ? " · Linked to voice agent" : ""}</span><span>Permissions: ${escHtml(modeLabel)}</span><span>${escHtml(session.directory)}</span>${session.latest_reply ? `<pre>${escHtml(session.latest_reply)}</pre>` : ""}${session.error ? `<span>${escHtml(session.error)}</span>` : ""}`;
         row.addEventListener("click", () => {
           this.selected = session;
           for (const card of this.list.children) card.setAttribute("aria-pressed", String(card === row));
           this.updateComposer();
+          $("#session-permissions-form").scrollIntoView({ block: "nearest" });
         });
         this.list.append(row);
         if (session.session_id === focusedId) row.focus({ preventScroll: true });
@@ -90,5 +99,51 @@ export class AgentSessions {
     const stopped = ["stopped", "failed"].includes(this.selected?.state);
     $("#session-message-form").hidden = !this.selected || stopped;
     $("#session-message-target").textContent = this.selected?.name || "";
+    $("#session-permissions-form").hidden = !this.selected;
+    $("#session-permission-target").textContent = this.selected?.name || "";
+    const select = $("#session-permission-mode");
+    const pending = this.permissionUpdates.has(this.selected?.session_id);
+    const controlled = this.selected?.permission_control === true;
+    select.disabled = !controlled || pending;
+    $("#session-permission-apply").disabled = !controlled || pending;
+    if (this.permissionSelectionId !== this.selected?.session_id) {
+      this.permissionSelectionId = this.selected?.session_id;
+      this.observedPermissionMode = this.selected?.permission_mode;
+      select.value = this.selected?.permission_mode || "";
+      $("#session-permission-status").textContent = "";
+    } else if (!pending && this.observedPermissionMode !== this.selected?.permission_mode && document.activeElement !== select) {
+      this.observedPermissionMode = this.selected?.permission_mode;
+      select.value = this.selected?.permission_mode || "";
+    }
+    $("#session-permission-hint").textContent = controlled
+      ? "Applies immediately to this session's future tool requests. Answer any open permission prompt separately."
+      : this.selected?.permission_control_reason || (stopped ? "This session has stopped." : "Permissions are unavailable until this session connects.");
+  }
+
+  async applyPermissions() {
+    const session = this.selected;
+    if (!session?.permission_control || this.permissionUpdates.has(session.session_id)) return;
+    const mode = $("#session-permission-mode").value;
+    this.permissionUpdates.add(session.session_id);
+    $("#session-permission-status").textContent = "Applying permissions…";
+    this.updateComposer();
+    try {
+      const response = await fetch(`/api/agent-sessions/${encodeURIComponent(session.session_id)}/permission-mode`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "Permission change failed.");
+      if (data.session_id !== session.session_id || data.permission_mode !== mode) throw new Error("Claude did not confirm the requested permission mode. Refresh to check.");
+      if (this.selected?.session_id === session.session_id) {
+        Object.assign(this.selected, data);
+        this.observedPermissionMode = mode;
+        $("#session-permission-status").textContent = "Permissions applied to this session.";
+      }
+    } catch (error) {
+      if (this.selected?.session_id === session.session_id) $("#session-permission-status").textContent = error.message;
+    } finally {
+      this.permissionUpdates.delete(session.session_id);
+      this.updateComposer();
+    }
   }
 }

@@ -630,6 +630,7 @@ that behavior is intended.
 | `--claude_agent_background_timeout_s` | Deadline for native jobs after the foreground voice response ends, excluding permission wait; default 1800 seconds. |
 | `--claude_agent_max_background_sessions` | Concurrent SDK clients retained for native background jobs per call; default 4. |
 | `--claude_agent_session_tools` | Enable app-only independent session creation, messaging, discovery and stopping; default true. |
+| `--claude_agent_session_state_path` | Local registry for resuming app-owned SDK session IDs, native histories, and permission modes after a service restart; default `~/.speech-to-speech/claude-sessions.json`. |
 | `--claude_agent_max_independent_sessions` | App-wide independent SDK client limit, including the external reply router; default 4. |
 | `--claude_agent_terminal_tool` | Enable the app-only visible macOS Terminal launcher; default true. |
 | `--claude_agent_orchestrator false` | Disable the prompt preference for delegating substantive work. Background completion handling and all native tools remain available. |
@@ -694,10 +695,25 @@ Realtime `session.max_response_output_tokens` and per-response
 `response.max_output_tokens` integer values override the CLI cap for that
 request. Thinking and effort support depends on the selected model.
 
-The conversation panel's **Claude permissions** selector changes permission mode
+The conversation panel's **Voice agent permissions** selector changes permission mode
 for subsequent Claude voice turns in the connected call. It offers Standard,
-Accept edits, Auto-allow (bypass), and Plan; existing worker sessions keep their
-own permission settings. It leaves global Claude Code settings unchanged.
+Accept edits, Allow all tools (bypass), Plan, Deny unapproved tools, and Auto
+(Claude's classifier, when supported). New independent SDK sessions inherit
+the voice call's current mode, then keep their own permission settings.
+In **Sessions**, select an app-owned session, choose its permission mode, and
+press **Apply permissions**. The app uses the SDK's live control connection
+and waits for acknowledgement; it does not restart work or send a model prompt.
+See the [SDK's live permission control](https://code.claude.com/docs/en/agent-sdk/permissions#set-permission-mode).
+The change affects future tool requests; answer existing permission prompts
+separately. These controls work even when the microphone call is stopped and
+leave global Claude Code settings unchanged.
+App-owned session identities and modes are checkpointed locally with private
+file permissions. A service restart reconnects to the same native SDK histories;
+it does not replay queued tasks. Explicitly stopping a worker removes it from
+the automatic resume list. The SDK's native logs retain its conversation history.
+External terminal sessions remain listed with a disabled selector and an
+explanation: discovery and peer messaging do not provide a permission control
+connection. Change those modes in their terminal or Claude Remote Control.
 
 The adapter supplies the current pipeline conversation as a JSON transcript to
 a fresh SDK client for each response. This preserves edited history,

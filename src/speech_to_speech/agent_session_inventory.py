@@ -103,6 +103,12 @@ class AgentSessionInventory:
                         "working_with": native_id in contacts or name in contacts,
                         "latest_reply": "",
                         "queued_messages": 0,
+                        "permission_mode": entry.get("permissionMode") or entry.get("permission_mode"),
+                        "permission_control": False,
+                        "permission_control_reason": (
+                            "This app has no control connection to this external session. "
+                            "Change its permissions in its terminal or Claude Remote Control."
+                        ),
                     }
                 )
             return {"sessions": sessions, "enabled": True, "discovery_error": self._error}

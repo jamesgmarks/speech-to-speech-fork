@@ -84,6 +84,12 @@ class ClaudeAgentSDKArguments(LanguageModelBaseArguments):
             },
         )
     )
+    claude_agent_session_state_path: str = field(
+        default="~/.speech-to-speech/claude-sessions.json",
+        metadata={
+            "help": "Local app-owned SDK session identities and permission modes, resumed across service restarts."
+        },
+    )
     claude_agent_allowed_tools: list[str] = field(
         default_factory=list,
         metadata={"help": "Tool names or scoped rules to auto-approve. This does not limit the available toolset."},

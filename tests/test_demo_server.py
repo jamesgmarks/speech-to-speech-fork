@@ -122,6 +122,65 @@ async def test_session_inventory_proxy_is_pinned_and_has_no_message_endpoint(mon
     assert not (await demo_server.agent_sessions())["enabled"]
 
 
+async def test_permission_proxy_changes_only_an_exact_session_on_the_pinned_backend(monkeypatch):
+    calls = []
+    peer_id = "peer_" + "a" * 32
+    status = 200
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def post(self, url, **kwargs):
+            calls.append((url, kwargs))
+            data = (
+                {"session_id": peer_id, "permission_mode": "plan"} if status == 200 else {"detail": "Session stopped"}
+            )
+            return httpx.Response(status, json=data, request=httpx.Request("POST", url))
+
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "wss://speech.example/prefix/v1/realtime?token=local")
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", Client)
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "server": ("testserver", 80),
+            "path": "/",
+            "query_string": b"",
+            "headers": [],
+        }
+    )
+    change = demo_server.SessionPermissionModeChange(mode="plan")
+    data = await demo_server.session_permission_mode(peer_id, change, request)
+    assert data["permission_mode"] == "plan"
+    assert calls == [
+        (
+            f"https://speech.example/prefix/v1/agent/sessions/{peer_id}/permission-mode?token=local",
+            {"json": {"mode": "plan"}},
+        )
+    ]
+    for invalid in ["native-id", "../escape", "peer_" + "z" * 32]:
+        with pytest.raises(demo_server.HTTPException) as exc:
+            await demo_server.session_permission_mode(invalid, change, request)
+        assert exc.value.status_code == 400
+    request = Request({**request.scope, "headers": [(b"origin", b"https://malicious.example")]})
+    with pytest.raises(demo_server.HTTPException) as exc:
+        await demo_server.session_permission_mode(peer_id, change, request)
+    assert exc.value.status_code == 403 and len(calls) == 1
+    request.scope["headers"] = []
+    request = Request(request.scope)
+    status = 409
+    with pytest.raises(demo_server.HTTPException) as exc:
+        await demo_server.session_permission_mode(peer_id, change, request)
+    assert exc.value.status_code == 409 and exc.value.detail == "Session stopped"
+
+
 def test_resolve_tier_prefers_oauth_pro_without_hub_lookup(monkeypatch):
     def unexpected_get(*args, **kwargs):
         pytest.fail("OAuth PRO users must not require a whoami-v2 lookup")

@@ -49,6 +49,9 @@ async def test_inventory_deduplicates_native_sessions_and_marks_voice_contacts(m
     assert first["sessions"][0]["state"] == "working"
     assert first["sessions"][1]["working_with"]
     assert not first["sessions"][2]["working_with"]
+    assert not first["sessions"][1]["permission_control"]
+    assert first["sessions"][1]["permission_mode"] is None
+    assert "no control connection" in first["sessions"][1]["permission_control_reason"]
     spawn.assert_awaited_once()
     assert spawn.call_args.args == ("/bin/claude", "agents", "--json")
 

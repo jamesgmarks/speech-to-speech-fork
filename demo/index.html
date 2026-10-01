@@ -174,17 +174,34 @@
           <button id="conversation-view" type="button" aria-pressed="true">Conversation</button>
           <button id="sessions-view" type="button" aria-pressed="false">Sessions</button>
         </nav>
-        <label class="permission-mode">Claude permissions
+        <label class="permission-mode">Voice agent permissions
           <select id="permission-mode" disabled>
             <option value="default">Standard</option>
             <option value="acceptEdits">Accept edits</option>
             <option value="bypassPermissions">Auto-allow (bypass)</option>
             <option value="plan">Plan</option>
+            <option value="dontAsk">Deny unapproved tools</option>
+            <option value="auto">Auto (Claude classifier)</option>
           </select>
         </label>
         <div id="chat-history" class="chat-history"></div>
         <section id="agent-sessions" class="agent-sessions" aria-label="Agent sessions" hidden>
           <div class="sessions-controls"><span id="sessions-status" role="status">Loading sessions…</span><button id="sessions-refresh" type="button">Refresh</button></div>
+          <form id="session-permissions-form" hidden>
+            <label for="session-permission-mode">Permissions for <span id="session-permission-target"></span></label>
+            <select id="session-permission-mode">
+              <option value="" disabled>Unknown</option>
+              <option value="default">Standard</option>
+              <option value="acceptEdits">Accept edits</option>
+              <option value="bypassPermissions">Allow all tools (bypass)</option>
+              <option value="plan">Plan</option>
+              <option value="dontAsk">Deny unapproved tools</option>
+              <option value="auto">Auto (Claude classifier)</option>
+            </select>
+            <button id="session-permission-apply" type="submit">Apply permissions</button>
+            <p id="session-permission-hint"></p>
+            <p id="session-permission-status" role="status"></p>
+          </form>
           <div id="sessions-list"></div>
           <form id="session-message-form" hidden>
             <label for="session-message">Message <span id="session-message-target"></span></label>

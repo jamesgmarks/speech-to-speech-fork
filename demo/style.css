@@ -1878,6 +1878,11 @@ body:not(.chat-panel-collapsed) .bubble-stack {
 #session-message-form label { display: block; margin: 16px 0 8px; }
 #session-message { width: 100%; resize: vertical; padding: 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; font: inherit; margin-bottom: 8px; }
 #session-message-status { color: var(--text-dim); }
+#session-permissions-form { margin-bottom: 16px; }
+#session-permissions-form label { display: block; margin: 16px 0 8px; }
+#session-permission-mode { width: 100%; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px; font: inherit; margin-bottom: 8px; }
+#session-permission-hint, #session-permission-status { color: var(--text-dim); }
+.agent-sessions button:disabled { opacity: .5; cursor: default; }
 
 @media (max-width: 900px) {
   body {

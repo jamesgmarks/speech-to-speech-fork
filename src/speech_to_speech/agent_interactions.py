@@ -21,7 +21,12 @@ class AgentPermissionReply(BaseModel):
     event_id: str | None = None
 
 
-AgentPermissionModeName = Literal["default", "acceptEdits", "bypassPermissions", "plan"]
+AgentPermissionModeName = Literal["default", "acceptEdits", "bypassPermissions", "plan", "dontAsk", "auto"]
+
+
+class AgentSessionPermissionModeSet(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    mode: AgentPermissionModeName
 
 
 class AgentPermissionModeSet(BaseModel):
