@@ -748,3 +748,70 @@ def test_workers_nested_background_command_is_not_an_independent_announcement(mo
     finally:
         h.cleanup()
     assert events.empty()
+
+
+async def test_external_inventory_and_history_tools_are_immediate_read_only_and_client_local(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    external = {
+        "source": "external",
+        "name": "james-b6",
+        "session_id": "native-id",
+        "native_session_id": "native-id",
+        "directory": "/tmp/james",
+        "state": "idle",
+    }
+    inventory = SimpleNamespace(
+        list=AsyncMock(return_value={"sessions": [external], "enabled": True, "discovery_error": None})
+    )
+    monkeypatch.setattr(adapter, "AgentSessionInventory", lambda registry: inventory)
+    read = AsyncMock(return_value={"messages": [{"role": "assistant", "text": "Recent reply."}]})
+    monkeypatch.setattr(adapter, "read_agent_session", read)
+    h = handler()
+    req = request()
+    tools = {t.name: t for t in h._independent_session_tools(SimpleNamespace(runtime_config=req.runtime_config))}
+    result = await tools["list_external_agent_sessions"].handler({})
+    assert json.loads(result["content"][0]["text"])["sessions"][0]["directory"] == "/tmp/james"
+    result = await tools["read_agent_session"].handler({"target": "James B6", "max_messages": 7})
+    assert "Recent reply" in result["content"][0]["text"]
+    read.assert_awaited_once_with(inventory, "James B6", 7)
+    assert FakeClient.instances == []  # No persistent router/model turn for reads.
+    req.runtime_config.connection_active = False
+    denied = await tools["read_agent_session"].handler({"target": "James"})
+    assert denied["isError"]
+    assert read.await_count == 1
+
+
+async def test_external_send_resolves_native_id_and_requires_native_reply_channel(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    external = {
+        "source": "external",
+        "name": "james-b6",
+        "session_id": "native-id",
+        "native_session_id": "native-id",
+        "directory": "/tmp/james",
+        "state": "idle",
+    }
+    inventory = SimpleNamespace(list=AsyncMock(return_value={"sessions": [external]}))
+    monkeypatch.setattr(adapter, "AgentSessionInventory", lambda registry: inventory)
+    peer = SimpleNamespace(send=Mock(return_value={"status": "queued"}))
+    registry = SimpleNamespace(find=lambda name: peer, track_external=Mock())
+    h = handler()
+    h._peer_sessions = registry
+    req = request()
+    tools = {t.name: t for t in h._independent_session_tools(SimpleNamespace(runtime_config=req.runtime_config))}
+    reply = await tools["send_external_agent_message"].handler({"target": "native-id", "message": "Status please."})
+    result = json.loads(reply["content"][0]["text"])
+    assert result["target"] == "james-b6" and result["delivery"] == "pending"
+    prompt = peer.send.call_args.args[0]
+    assert '"target": "james-b6"' in prompt
+    assert "built-in tool named exactly SendMessage" in prompt
+    assert "from address" in prompt and "not an MCP" in prompt
+    registry.track_external.assert_called_once_with("native-id")
+    inventory.list.return_value["sessions"].append({**external, "name": "james-b7", "session_id": "other"})
+    denied = await tools["send_external_agent_message"].handler({"target": "James", "message": "Status please."})
+    assert denied["isError"] and "Ambiguous" in denied["content"][0]["text"]
+    assert peer.send.call_count == 1

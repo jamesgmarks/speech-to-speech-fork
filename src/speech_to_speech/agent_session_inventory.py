@@ -7,6 +7,34 @@ from time import monotonic
 from typing import Any
 
 
+def resolve_session_target(target: str, sessions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resolve exact IDs/names first, then unambiguous spoken name prefixes."""
+    if not isinstance(target, str) or not target.strip() or len(target) > 4096 or "\0" in target:
+        raise ValueError("Choose a session name or ID.")
+    target = target.strip().casefold()
+
+    def normalized(value: str) -> str:
+        return "".join(c for c in value.casefold() if c.isalnum())
+
+    exact = [
+        s
+        for s in sessions
+        if target in {str(s.get(k, "")).casefold() for k in ("name", "session_id", "native_session_id")}
+    ]
+    matches = exact
+    if not matches:
+        key = normalized(target)
+        matches = [s for s in sessions if normalized(str(s.get("name", ""))) == key]
+        if not matches and len(key) >= 3:
+            matches = [s for s in sessions if normalized(str(s.get("name", ""))).startswith(key)]
+    if len(matches) == 1:
+        return matches[0]
+    if matches:
+        choices = ", ".join(f"{s.get('name')} ({s.get('session_id')})" for s in matches)
+        raise ValueError(f"Ambiguous session target. Choose one of: {choices}")
+    raise ValueError("No session matches that name or ID. List sessions to choose an exact target.")
+
+
 class AgentSessionInventory:
     def __init__(self, registry: Any = None):
         self.registry = registry

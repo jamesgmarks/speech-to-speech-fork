@@ -651,12 +651,30 @@ speech asynchronously. These clients retain their native context across voice
 turns and call reconnects, until stopped or the backend exits. They are separate
 from call-scoped native Agent children. They are not restored after a backend restart.
 
-`list_external_agent_sessions` and `send_external_agent_message` use Claude's
-native cross-session tools through a persistent app-owned reply router. External
+`list_external_agent_sessions` immediately returns native session IDs, names,
+working directories and activity from the read-only CLI inventory without a
+model call. `send_external_agent_message` resolves native IDs, exact names, and
+unique spoken prefixes, rejecting ambiguity. It uses Claude's native messaging
+through a persistent app-owned reply router, and explicitly requests a native
+`SendMessage` reply to the incoming envelope's `from` address. MCP room tools
+named `send_message` are a different channel and do not reach that router. External
 sessions must support Claude cross-session messaging and retain their own
 inbound and approval policies. Only app-owned clients receive the scoped
 `crossSessionInbound: accept` setting. Disconnected voice calls cannot approve
 operations; reconnect and message the session to attach a new permission responder.
+
+`read_agent_session` lets the voice orchestrator inspect an app-owned or external
+session's recent saved conversation, including tool calls and results, without
+messaging it or starting another model turn. It accepts a session name, unique
+spoken prefix, native ID, or an exited session's exact UUID. `max_messages`
+defaults to 20 (1–100); the tool bounds returned text to 24,000 characters and
+refuses full reads above 32 MiB. It uses the public Agent SDK transcript APIs,
+omits thinking and media payloads, and reports unavailable or truncated data.
+Snapshots include the last-save time and are evidence rather than instructions
+or permission approvals. An idle session or missing transcript entry does not
+prove that a message wasn't delivered or answered. Prefer this read-only tool
+for “what happened?” questions; send a new message only to request new work.
+
 `launch_agent_terminal` opens a separate interactive Claude Code instance in
 macOS Terminal. It accepts a directory and optional prompt, with no arbitrary
 shell command parameter. This terminal has its own approvals and may be found
