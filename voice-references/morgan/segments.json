@@ -1,0 +1,19 @@
+{
+  "sample_rate": 24000,
+  "gap_seconds": 0.2,
+  "edge_fade_ms": 6,
+  "denoise_mix": 0.25,
+  "all_lines_basename": "all-morgan-excerpts",
+  "noise_probe": {"source": "from_a_tiktok", "start": 6.8, "end": 7.5},
+  "segments": [
+    {
+      "id": "continuous-narration",
+      "source": "from_a_tiktok",
+      "start": 14.72,
+      "end": 31.36,
+      "text": "When to leave and where to go. It's not Shakespeare. It does not speak in memorable lines. My inner voice always gives it to me straight. Tells me who my real friends are. When to say yes, when to say no."
+    }
+  ],
+  "reference_order": ["continuous-narration"],
+  "note": "One continuous passage from the supplied video, preserving natural pauses and delivery. Boundaries use local Parakeet token alignment; a light RNNoise wet/dry mix reduces background audio without changing speed or pitch."
+}

@@ -1,6 +1,6 @@
 # Local voice references
 
-`voices.json` registers **James**, **Pepper**, **Pepper (upbeat)**, and **Forrest Gump** for the
+`voices.json` registers **James**, **Pepper**, **Pepper (upbeat)**, **Forrest Gump**, and **Morgan** for the
 settings voice selector. Every entry points to a local WAV and its matching
 transcript; the recordings, transcripts, generated samples, and processing
 reports are excluded from Git. Keep those files in place on this computer.
@@ -30,3 +30,4 @@ See [Pepper's workflow](pepper/README.md) for the editing and sample-generation
 steps. Its upbeat variant uses a different reference recording; Qwen3-TTS Base
 does not expose the direct emotional instructions of CustomVoice/VoiceDesign.
 See [Forrest's workflow](forest/README.md) for his reference edits and cleanup.
+See [Morgan's workflow](morgan/README.md) for preparation from a video clip.

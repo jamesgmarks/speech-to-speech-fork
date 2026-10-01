@@ -2,5 +2,6 @@
   {"id": "custom:james", "name": "James", "ref_audio": "james/reference.wav", "ref_text_file": "james/reference.txt"},
   {"id": "custom:pepper", "name": "Pepper", "ref_audio": "pepper/reference.wav", "ref_text_file": "pepper/reference.txt"},
   {"id": "custom:pepper-upbeat", "name": "Pepper (upbeat)", "ref_audio": "pepper/reference-upbeat.wav", "ref_text_file": "pepper/reference-upbeat.txt"},
-  {"id": "custom:forrest", "name": "Forrest Gump", "ref_audio": "forest/reference-multi-scene.wav", "ref_text_file": "forest/reference-multi-scene.txt", "language": "english", "seed": 42}
+  {"id": "custom:forrest", "name": "Forrest Gump", "ref_audio": "forest/reference-multi-scene.wav", "ref_text_file": "forest/reference-multi-scene.txt", "language": "english", "seed": 42},
+  {"id": "custom:morgan", "name": "Morgan", "ref_audio": "morgan/reference.wav", "ref_text_file": "morgan/reference.txt", "language": "english", "seed": 42}
 ]
