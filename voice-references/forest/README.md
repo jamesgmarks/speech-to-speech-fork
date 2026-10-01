@@ -41,6 +41,19 @@ The shared workflow also preserves the existing Pepper outputs. `segments.json`
 controls the selection order, edit boundaries, cleanup mix, and transcript.
 The registered `custom:forrest` profile appears as **Forrest Gump** in the
 demo's **Settings → Voice** selector after the backend reloads its catalog.
+It explicitly uses `reference-multi-scene.wav` and its matching transcript,
+English as the automatic-language fallback, and MLX seed 42. These match the
+approved `preview-single-pass-mixed` generation. The earlier live setup used
+automatic language and unseeded sampling, which did not reproduce that preview
+even with the same reference. A controlled test reproduced the approved
+English output within one PCM quantization step; automatic language produced
+a different 7.12-second performance rather than the approved 8.88 seconds.
+The live backend also uses a worker-local compiled sampler for seeded profiles:
+the import-time MLX sampler otherwise captures the setup thread's random state.
+`preview-live-approved-settings.mp3` captures the corrected live passage.
+Its waveform correlation with the approved preview is 0.9999996 after accounting
+for the pipeline's 24→16→24 kHz resampling and 163 ms leading-silence trim;
+the remaining playback gain difference is 0.021 dB.
 
 `preview.wav` and `preview.mp3` preserve the initial 7.78-second preview from
 the Claude/Qwen3 pipeline, using the mixed reference and original text for Amir:

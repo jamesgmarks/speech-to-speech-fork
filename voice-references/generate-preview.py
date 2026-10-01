@@ -18,6 +18,7 @@ parser.add_argument("--text", default="amir-demo.txt", help="Text file inside th
 parser.add_argument("--reference", default="reference", help="Reference WAV/TXT basename inside this folder.")
 parser.add_argument("--output", default="amir-demo", help="Output basename inside this folder.")
 parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--language", default="english", help="Qwen3 generation language; default english.")
 parser.add_argument("--match-level", help="Optional comparison WAV inside this folder; match its RMS playback level.")
 args = parser.parse_args()
 folder = args.folder.expanduser().resolve()
@@ -35,7 +36,7 @@ for result in model.generate(
     text=text,
     ref_audio=str(folder / f"{args.reference}.wav"),
     ref_text=(folder / f"{args.reference}.txt").read_text().strip(),
-    lang_code="english",
+    lang_code=args.language,
     stream=True,
     streaming_interval=12 / 12.5,
     max_tokens=700,
@@ -81,6 +82,7 @@ report = {
     "model": str(model_path),
     "reference": f"{args.reference}.wav",
     "seed": args.seed,
+    "language": args.language,
     "sample_rate": sample_rate,
     "audio_seconds": round(len(audio) / sample_rate, 3),
     "generation_seconds": round(time.perf_counter() - started, 3),
