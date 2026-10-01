@@ -166,6 +166,10 @@ artifacts = [
 ]
 if manifest.get("upbeat_reference_order"):
     artifacts.append(("reference-upbeat", [by_id[name] for name in manifest["upbeat_reference_order"]], True))
+for basename, order in manifest.get("comparison_reference_orders", {}).items():
+    if Path(basename).name != basename:
+        raise ValueError("Comparison references must use basenames inside the voice folder.")
+    artifacts.append((basename, [by_id[name] for name in order], True))
 for filename, selection, cleaned in artifacts:
     audio, edits, scale = assemble(selection, cleaned)
     sf.write(FOLDER / f"{filename}.wav", audio, rate, subtype="PCM_16")
