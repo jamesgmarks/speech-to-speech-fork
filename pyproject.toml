@@ -68,6 +68,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+claude-agent-sdk = [
+    "claude-agent-sdk>=0.2.163,<0.3",
+]
 chattts = [
     "ChatTTS>=0.2.1",
 ]

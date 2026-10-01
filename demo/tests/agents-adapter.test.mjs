@@ -198,3 +198,25 @@ test("the client negotiates speculative snapshot extensions on the wire", async 
     "speech_to_speech.input_audio_transcription.snapshot",
   ]);
 });
+
+test("the pinned SDK preserves Claude permission events and sends correlated decisions", () => {
+  globalThis.localStorage = { getItem() { return null; } };
+  const client = new S2sRealtimeClient({ transport: "websocket", directUrl: "ws://unused" });
+  const transport = new realtime.OpenAIRealtimeWebSocket({ useInsecureApiKey: true });
+  const received = [];
+  const sent = [];
+  transport.on("*", event => client._onTransportEvent(event));
+  transport.sendEvent = event => sent.push(event);
+  client._transport = transport;
+  client.addEventListener("agent-permission-requested", event => received.push(event.detail));
+  const request = {
+    type: "speech_to_speech.agent.permission.requested", request_id: "permission-1",
+    tool_name: "Write", input: { file_path: "/tmp/probe.txt", content: "probe" },
+    response_id: "r1", timeout_s: 300,
+  };
+  transport._onMessage({ data: JSON.stringify(request) });
+  assert.deepEqual(received, [request]);
+  client.replyAgentPermission({ request_id: request.request_id, decision: "deny" });
+  assert.deepEqual(sent, [{ type: "speech_to_speech.agent.permission.reply",
+    event_id: "agent_permission_permission-1", request_id: "permission-1", decision: "deny" }]);
+});

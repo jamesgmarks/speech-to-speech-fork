@@ -13,6 +13,7 @@ from speech_to_speech.arguments_classes.chat_completions_language_model_argument
     ChatCompletionsLanguageModelHandlerArguments,
 )
 from speech_to_speech.arguments_classes.chat_tts_arguments import ChatTTSHandlerArguments
+from speech_to_speech.arguments_classes.claude_agent_sdk_arguments import ClaudeAgentSDKArguments
 from speech_to_speech.arguments_classes.facebookmms_tts_arguments import FacebookMMSTTSHandlerArguments
 from speech_to_speech.arguments_classes.faster_whisper_stt_arguments import (
     FasterWhisperSTTHandlerArguments,
@@ -224,11 +225,14 @@ def _simple_handler_factory(
     setup_should_listen: bool = False,
     attach_speculative_turns: bool = False,
     context_kwargs: bool = False,
+    pass_text_output_queue: bool = False,
     pass_assistant_language_flag: bool = False,
 ) -> HandlerFactory:
     def create(context: HandlerContext, config: Mapping[str, Any]) -> Any:
         handler_class = _load_handler(module_name, class_name)
         setup_kwargs = dict(config)
+        if pass_text_output_queue:
+            setup_kwargs["text_output_queue"] = context.text_output_queue
         if context_kwargs:
             setup_kwargs.update(
                 cancel_scope=context.cancel_scope,
@@ -510,6 +514,19 @@ LLM_BACKENDS = build_backend_registry(
             _create_local_llm("mlx-lm"),
             config_prefix="llm",
             required_extra="mlx-lm",
+        ),
+        BackendSpec(
+            "claude-agent-sdk",
+            "llm",
+            ClaudeAgentSDKArguments,
+            _simple_handler_factory(
+                "speech_to_speech.LLM.claude_agent_sdk_language_model",
+                "ClaudeAgentSDKModelHandler",
+                context_kwargs=True,
+                pass_text_output_queue=True,
+            ),
+            config_prefix="claude_agent",
+            required_extra="claude-agent-sdk",
         ),
         BackendSpec(
             "responses-api",

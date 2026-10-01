@@ -639,6 +639,51 @@ class VADHandler(BaseHandler[VADIn, VADOut]):
             audio_chunk, runtime_config = audio_chunk
         self._apply_runtime_turn_detection(runtime_config)
 
+        broker = runtime_config.agent_interactions if runtime_config is not None else None
+        agent_waiting = bool(broker and broker.pending())
+        if agent_waiting:
+            assert broker is not None
+            target = broker.voice_target()
+            if not getattr(self, "_agent_voice_active", False):
+                self._agent_voice_active = True
+                self._agent_voice_silence_samples = self.iterator.min_silence_samples
+            # Keep a natural pause inside a short approval phrase together.
+            silence_samples = max(self._agent_voice_silence_samples, self.sample_rate * 0.4)
+            if self.iterator.min_silence_samples != silence_samples:
+                self.iterator.min_silence_samples = silence_samples
+            if getattr(self, "_agent_voice_target", None) != target:
+                self.iterator.reset_states()
+                self._agent_voice_target = target
+            # With simultaneous prompts require an explicit on-screen choice.
+            if target is None:
+                return
+            samples = int2float(np.frombuffer(audio_chunk, dtype=np.int16))
+            self._total_samples += len(samples)
+            vad_output = self.iterator(torch.from_numpy(samples))
+            if vad_output:
+                audio = torch.cat(vad_output).cpu().numpy()
+                if len(audio) >= self.sample_rate * 0.15:
+                    sink = getattr(self, "streaming_stt_sink", None)
+                    if sink is not None:
+                        # Streaming STT receives this isolated control utterance
+                        # without a conversation turn or partial publication.
+                        sink.discard_utterance()
+                        sink.start_turn(None, None)
+                        sink.append_audio((np.clip(audio, -1, 1) * 32767).astype(np.int16).tobytes())
+                        sink.commit_boundary(None, None)
+                    yield VADAudio(audio=audio, runtime_config=runtime_config, mode="final", agent_request_id=target)
+            return
+        if getattr(self, "_agent_voice_active", False):
+            self.iterator.reset_states()
+            self.iterator.min_silence_samples = self._agent_voice_silence_samples
+            self._agent_voice_active = False
+            self._agent_voice_target = None
+            self._speech_started_emitted = False
+            self._current_turn_id = None
+            self._current_turn_revision = None
+            self._speculative_audio_prefix = None
+            self._speculative_raw_audio_prefix = None
+
         if not self.should_listen.is_set():
             return
 
@@ -969,6 +1014,10 @@ class VADHandler(BaseHandler[VADIn, VADOut]):
         return enhanced.numpy().squeeze()
 
     def on_session_end(self):
+        if getattr(self, "_agent_voice_active", False):
+            self.iterator.min_silence_samples = self._agent_voice_silence_samples
+        self._agent_voice_active = False
+        self._agent_voice_target = None
         streaming_stt_sink = getattr(self, "streaming_stt_sink", None)
         if streaming_stt_sink is not None:
             streaming_stt_sink.cancel_session()

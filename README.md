@@ -236,6 +236,7 @@ This installs the package in editable mode. With the environment activated, use 
 | STT | OpenAI Realtime transcription | hosted or compatible WebSocket server | built-in |
 | STT | vLLM Realtime transcription (experimental) | local or remote vLLM server | built-in |
 | LLM | OpenAI-compatible API (`responses-api`, `chat-completions`) | hosted providers or self-hosted servers | built-in |
+| LLM | Claude Code Agent SDK (`claude-agent-sdk`) | Claude with built-in tools and MCP | `claude-agent-sdk` |
 | LLM | [Transformers](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending) | CUDA / CPU | built-in |
 | LLM | [mlx-lm](https://github.com/ml-explore/mlx-lm) | Apple Silicon | built-in on macOS |
 | TTS | [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice) (default) | GGML / CUDA on Linux, mlx-audio on macOS | built-in |
@@ -408,6 +409,7 @@ The LLM is the most compute-intensive and highest-latency component in the pipel
 
 - **Local inference**: `transformers` on CUDA / CPU and `mlx-lm` on Apple Silicon.
 - **Self-hosted servers**: `responses-api` and `chat-completions` can point at a local [vLLM](https://github.com/vllm-project/vllm) or [llama.cpp](https://github.com/ggerganov/llama.cpp) server.
+- **Claude Code agents**: `claude-agent-sdk` runs Claude through the Python Agent SDK, including its built-in tools and configured MCP servers.
 - **Provider APIs**: the same backends work with OpenAI, [HF Inference Providers](https://huggingface.co/inference-providers), [OpenRouter](https://openrouter.ai), and other OpenAI-compatible providers.
 
 Two API backends are available, sharing the same `--responses_api_*` connection flags:
@@ -531,6 +533,89 @@ speech-to-speech serve \
     --responses_api_reasoning_effort none \
     --responses_api_stream
 ```
+
+### Claude Code Agent SDK
+
+Install the optional adapter dependency and authenticate Claude Code using its
+supported login or provider environment (for example `ANTHROPIC_API_KEY`). The
+Python SDK includes a Claude Code CLI; an external CLI can be selected with
+`--claude_agent_cli_path`.
+
+```bash
+uv sync --extra claude-agent-sdk --extra webrtc
+# Alternatively: pip install "speech-to-speech[claude-agent-sdk]"
+
+speech-to-speech serve \
+    --mac-optimal-settings \
+    --llm_backend claude-agent-sdk \
+    --model_name sonnet \
+    --claude_agent_cwd /path/to/your/project \
+    --claude_agent_max_tokens 2048 \
+    --claude_agent_effort low \
+    --stream_batch_sentences 1
+```
+
+On other platforms, omit `--mac-optimal-settings` and choose your STT/TTS
+backends as usual. Speech recognition remains required (`--stt none` is not
+supported by this adapter).
+
+All Claude Code tools remain available by default, with the Claude Code system
+prompt and `user`, `project`, and `local` settings loaded. Tools run inside the
+SDK; they are separate from Realtime client function tools, which this adapter
+rejects with a response error. Normal Claude Code permission rules apply.
+When a tool needs approval, the demo shows its name and exact inputs with
+**Allow once** and **Deny** buttons. With one request pending, you can instead
+say **“approve request”** or **“deny request”**. Permission speech answers the
+waiting SDK call without interrupting it or creating a new conversation turn;
+“yes” and “okay” do not grant approval. Multiple simultaneous requests require
+an on-screen choice. `AskUserQuestion` displays a form; a single question also
+accepts a spoken answer. Keep your microphone unmuted for voice replies.
+
+Approvals expire after 300 seconds by default. The generation deadline pauses
+while waiting for a decision; timeout, cancellation, and disconnect close the
+request without granting approval. Standalone pipelines without a connected
+permission responder deny requests requiring approval. Existing project rules,
+`--claude_agent_allowed_tools Read 'Bash(ls *)'`, and
+`--claude_agent_permission_mode` still configure normal approvals. `allowed_tools`
+auto-approves matching calls; it does **not** limit the available tools.
+`bypassPermissions` auto-approves operations and should only be selected when
+that behavior is intended.
+
+| Setting | Purpose |
+| --- | --- |
+| `--model_name` | Claude model ID or alias; default `sonnet`. |
+| `--claude_agent_max_tokens` | Output-token cap **per model request**, including thinking and tool-call output. Unset uses Claude Code's default. |
+| `--claude_agent_effort low` | Reduce reasoning effort to favor response time. Unset uses the SDK default. |
+| `--claude_agent_thinking adaptive\|enabled\|disabled` | Override thinking mode where supported by the selected model. |
+| `--claude_agent_thinking_budget_tokens` | Fixed budget for `enabled` thinking (minimum 1024, smaller than the output-token cap). |
+| `--claude_agent_max_turns` | Limit agentic model turns per voice response; unset uses the SDK default. |
+| `--claude_agent_max_budget_usd` | Optional SDK spending limit per voice response. |
+| `--claude_agent_request_timeout_s` | Generation deadline including startup and tools, excluding human permission wait; default 120 seconds. |
+| `--claude_agent_permission_timeout_s` | Time to answer each permission prompt or agent question; default 300 seconds. |
+| `--claude_agent_max_retries` | Retry limit for provider failures; unset uses Claude Code's default. |
+| `--claude_agent_stream false` | Buffer output instead of streaming; default is streaming. |
+| `--stream_batch_sentences` | Sentences per spoken batch; default 1 for this backend. |
+| `--chat_size` | Number of user turns retained in pipeline history; default 30. |
+| `--claude_agent_cwd`, `--claude_agent_setting_sources` | Workspace and Claude Code configuration sources. |
+| `--claude_agent_mcp_config` | Optional MCP configuration JSON file. |
+| `--claude_agent_permission_mode`, `--claude_agent_allowed_tools` | Configure permissions while retaining the toolset. |
+
+The token cap maps to Claude Code's documented
+[`CLAUDE_CODE_MAX_OUTPUT_TOKENS`](https://code.claude.com/docs/en/env-vars)
+environment variable; it is not a total-token budget across an entire tool run.
+Realtime `session.max_response_output_tokens` and per-response
+`response.max_output_tokens` integer values override the CLI cap for that
+request. Thinking and effort support depends on the selected model.
+
+The adapter supplies the current pipeline conversation as a JSON transcript to
+a fresh SDK client for each response. This preserves edited history,
+out-of-band contexts, and cancellation rollback without leaking CLI sessions
+between callers. It adds CLI startup overhead and retains assistant text, not
+the SDK's internal tool transcript, across voice turns. Unclaimed hidden
+response prefetch is skipped so tools only run for a public response. History
+uses ordinary bounded trimming by default; `--compact_history true` adds
+separate summarization requests. See the
+[Python Agent SDK reference](https://code.claude.com/docs/en/agent-sdk/python).
 
 ### Combining with llama.cpp
 
@@ -684,7 +769,7 @@ See [ModuleArguments](./src/speech_to_speech/arguments_classes/module_arguments.
 - a common `--device`, if every part should run on the same device
 - macOS model/device defaults (`--mac-optimal-settings`)
 - STT implementation (`--stt`)
-- LLM backend (`--llm_backend`: `transformers`, `mlx-lm`, `responses-api`, or `chat-completions`)
+- LLM backend (`--llm_backend`: `transformers`, `mlx-lm`, `responses-api`, `chat-completions`, or `claude-agent-sdk`)
 - TTS implementation (`--tts`)
 - logging level
 - transcript logging (`--log_transcripts`)
@@ -742,7 +827,7 @@ pauses more likely to use the longer speculative response grace.
 
 ### STT, LLM, and TTS Parameters
 
-`model_name`, `torch_dtype`, and `device` are exposed for each STT, LLM, and TTS implementation. STT and TTS parameters use the handler prefix, for example `--stt_model_name` or `--qwen3_tts_device`. LLM model selection and chat settings are shared across backends via unprefixed flags, for example `--model_name` and `--chat_size`; backend-specific flags use the `responses_api_` prefix for the `responses-api` and `chat-completions` backends and the `llm_` prefix for local backends.
+`model_name`, `torch_dtype`, and `device` are exposed for each STT, LLM, and TTS implementation. STT and TTS parameters use the handler prefix, for example `--stt_model_name` or `--qwen3_tts_device`. LLM model selection and chat settings are shared across backends via unprefixed flags, for example `--model_name` and `--chat_size`; backend-specific flags use the `responses_api_` prefix for the `responses-api` and `chat-completions` backends the `claude_agent_` prefix for the Claude Code Agent SDK, and the `llm_` prefix for local backends.
 
 For example:
 

@@ -47,6 +47,12 @@ from openai.types.realtime.conversation_item_input_audio_transcription_completed
 from openai.types.realtime.realtime_response_create_params import RealtimeResponseCreateParams
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from speech_to_speech.agent_interactions import (
+    AgentPermissionReply,
+    AgentPermissionRequested,
+    AgentPermissionResolved,
+    AgentPermissionVoice,
+)
 from speech_to_speech.api.openai_realtime.handlers import (
     AudioHandler,
     ConversationHandler,
@@ -61,6 +67,7 @@ from speech_to_speech.api.openai_realtime.input_state import (
 from speech_to_speech.api.openai_realtime.runtime_config import RuntimeConfig
 from speech_to_speech.LLM.chat import Chat, make_user_message
 from speech_to_speech.pipeline.events import (
+    AgentPermissionEvent,
     AssistantOutputEvent,
     AssistantResponseDoneEvent,
     AssistantToolCallReadyEvent,
@@ -97,6 +104,7 @@ _EVENT_TYPE_TO_MODEL: dict[str, type[BaseModel]] = {
     "input_audio_buffer.commit": InputAudioBufferCommitEvent,
     "output_audio_buffer.clear": OutputAudioBufferClearEvent,
     "session.update": SessionUpdateEvent,
+    "speech_to_speech.agent.permission.reply": AgentPermissionReply,
     "conversation.item.create": ConversationItemCreateEvent,
     "conversation.item.truncate": ConversationItemTruncateEvent,
     "response.create": ResponseCreateEvent,
@@ -104,6 +112,7 @@ _EVENT_TYPE_TO_MODEL: dict[str, type[BaseModel]] = {
 }
 
 ClientEvent = Union[
+    AgentPermissionReply,
     InputAudioBufferAppendEvent,
     InputAudioBufferCommitEvent,
     OutputAudioBufferClearEvent,
@@ -115,6 +124,9 @@ ClientEvent = Union[
 ]
 
 ServerEvent = Union[
+    AgentPermissionRequested,
+    AgentPermissionResolved,
+    AgentPermissionVoice,
     SessionCreatedEvent,
     SessionUpdatedEvent,
     RealtimeErrorEvent,
@@ -382,6 +394,7 @@ class RealtimeService:
             # Suppress any in-flight compaction splice so a daemon worker can't
             # mutate a Chat tied to a closed session, and don't make further
             # billable LLM calls on its behalf once the splice is suppressed.
+            st.runtime_config.agent_interactions.cancel_all()
             st.runtime_config.chat.close()
             for input_tokens, output_tokens in st.pending_token_usage.values():
                 st.response_usage.input_tokens += input_tokens
@@ -546,6 +559,17 @@ class RealtimeService:
         self.response.maybe_start_tool_followup_prefetch(conn_id)
         return events
 
+    def handle_agent_permission_reply(self, conn_id: str, event: AgentPermissionReply) -> RealtimeErrorEvent | None:
+        st = self._state(conn_id)
+        broker = st.runtime_config.agent_interactions
+        pending = next((r for r in broker.pending() if r.request_id == event.request_id), None)
+        if pending is None or not st.in_response or pending.response_key != st.current_response_key:
+            return self.make_error(
+                "This agent request is no longer awaiting a reply in this session.", "stale_agent_request"
+            )
+        error = broker.respond(event.request_id, event.decision, event.answers)
+        return self.make_error(error, "invalid_agent_reply") if error else None
+
     def dispatch_pipeline_event(self, conn_id: str, event: PipelineEvent) -> list[ServerEvent]:
         """Route an internal pipeline event to the appropriate handler."""
         events = self._dispatch_pipeline_event(conn_id, event, wait_for_pending_reopen=True)
@@ -568,6 +592,7 @@ class RealtimeService:
                 AssistantToolCallReadyEvent,
                 ResponseGenerationDoneEvent,
                 ResponseFailedEvent,
+                AgentPermissionEvent,
             ),
         ):
             return False
@@ -583,6 +608,54 @@ class RealtimeService:
         *,
         wait_for_pending_reopen: bool,
     ) -> list[ServerEvent] | None:
+        st = self._state(conn_id)
+        if isinstance(event, AgentPermissionEvent):
+            if event.response_key != st.current_response_key and event.response_key not in st.pending_response_keys:
+                return []
+            if isinstance(event.event, AgentPermissionRequested):
+                if not any(
+                    r.request_id == event.event.request_id for r in st.runtime_config.agent_interactions.pending()
+                ):
+                    return []
+                if self.speculative_turns is not None:
+                    commit = (
+                        self.speculative_turns.commit_if_latest_after_reopen_grace
+                        if wait_for_pending_reopen
+                        else self.speculative_turns.try_commit_if_latest_after_reopen_grace
+                    )
+                    committed = commit(event.turn_id, event.turn_revision)
+                    if committed is None:
+                        return None
+                    if not committed:
+                        return []
+                if st.current_response_turn_id is None:
+                    st.current_response_turn_id = event.turn_id
+                    st.current_response_turn_revision = event.turn_revision
+                events = self.audio.resolve_input_terminals(conn_id)
+                missing = st.current_response_id is None
+                self.response._ensure_response(conn_id, event.response_key)
+                if missing:
+                    events.append(
+                        ResponseCreatedEvent(
+                            type="response.created",
+                            event_id=_generate_id("event"),
+                            response=self.response._build_response(conn_id, "in_progress"),
+                        )
+                    )
+                events.append(event.event.model_copy(update={"response_id": st.current_response_id}))
+                return events
+            if isinstance(event.event, AgentPermissionResolved):
+                return [event.event]
+            return []
+        if (
+            isinstance(event, (TranscriptionCompletedEvent, TranscriptionFailedEvent))
+            and event.agent_request_id is not None
+        ):
+            # Permission speech is control input, never a new conversation turn.
+            transcript = event.transcript if isinstance(event, TranscriptionCompletedEvent) else ""
+            error = st.runtime_config.agent_interactions.respond_voice(event.agent_request_id, transcript)
+            return [AgentPermissionVoice(request_id=event.agent_request_id, transcript=transcript, error=error)]
+
         # Provider-reported usage is billable accounting, not client-visible
         # assistant output. Cancellation must not make it stale.
         if isinstance(event, TokenUsageEvent):

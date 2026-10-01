@@ -585,3 +585,40 @@ def test_parse_arguments_all_fields_populated():
         assert isinstance(value, EXPECTED_FIELD_TYPES[f.name]), (
             f"Field {f.name!r}: expected {EXPECTED_FIELD_TYPES[f.name].__name__}, got {type(value).__name__}"
         )
+
+
+def test_claude_agent_sdk_options_and_mac_backend_override():
+    args = parse_arguments(
+        [
+            "--mac-optimal-settings",
+            "--llm_backend",
+            "claude-agent-sdk",
+            "--model_name",
+            "haiku",
+            "--claude_agent_max_tokens",
+            "1024",
+            "--claude_agent_effort",
+            "low",
+            "--claude_agent_thinking",
+            "adaptive",
+            "--claude_agent_max_turns",
+            "5",
+            "--claude_agent_request_timeout_s",
+            "30",
+            "--claude_agent_allowed_tools",
+            "Read",
+            "Bash(ls *)",
+        ]
+    )
+    config = args.llm_backend.config
+    assert args.llm_backend.name == "claude-agent-sdk"
+    assert args.llm_backend.spec.required_extra == "claude-agent-sdk"
+    assert config["model_name"] == "haiku"
+    assert config["max_tokens"] == 1024
+    assert config["effort"] == "low"
+    assert config["thinking"] == "adaptive"
+    assert config["max_turns"] == 5
+    assert config["request_timeout_s"] == 30
+    assert config["allowed_tools"] == ["Read", "Bash(ls *)"]
+    assert config["stream_batch_sentences"] == 1
+    assert config["compact_history"] is False

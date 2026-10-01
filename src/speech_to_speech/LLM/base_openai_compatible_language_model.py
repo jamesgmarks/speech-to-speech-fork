@@ -202,6 +202,21 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
         )
 
         self.user_role = user_role
+        self._setup_provider(api_key, base_url, disable_thinking, reasoning_effort)
+        self._prefetch_worker_slots = BoundedSemaphore(PREFETCH_PROVIDER_WORKER_LIMIT)
+        self._prefetch_workers_lock = Lock()
+        self._prefetch_workers: set[Thread] = set()
+        self.compactor = build_compactor(self._build_compaction_generate_fn()) if compact_history else None
+        self.warmup()
+
+    def _setup_provider(
+        self,
+        api_key: str | None,
+        base_url: str | None,
+        disable_thinking: bool,
+        reasoning_effort: str | None,
+    ) -> None:
+        """Configure provider resources separately from shared pipeline state."""
         if (
             api_key is None
             and not os.environ.get("OPENAI_API_KEY")
@@ -211,11 +226,6 @@ class BaseOpenAICompatibleHandler(BaseHandler[LLMIn, LLMOut], ABC):
             api_key = "none"
         self.client = OpenAI(api_key=api_key, base_url=base_url)
         self._extra_body = self._build_extra_body(base_url, disable_thinking, reasoning_effort)
-        self._prefetch_worker_slots = BoundedSemaphore(PREFETCH_PROVIDER_WORKER_LIMIT)
-        self._prefetch_workers_lock = Lock()
-        self._prefetch_workers: set[Thread] = set()
-        self.compactor = build_compactor(self._build_compaction_generate_fn()) if compact_history else None
-        self.warmup()
 
     @staticmethod
     def _is_official_openai(base_url: Optional[str]) -> bool:

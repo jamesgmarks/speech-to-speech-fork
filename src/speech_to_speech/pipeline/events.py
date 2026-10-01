@@ -67,6 +67,7 @@ class PartialTranscriptionEvent(PipelineEvent):
 
 
 class TranscriptionCompletedEvent(PipelineEvent):
+    agent_request_id: str | None = Field(default=None, exclude=True)
     type: Literal["transcription_completed"] = "transcription_completed"
     transcript: str
     language_code: Optional[str] = None
@@ -76,6 +77,7 @@ class TranscriptionCompletedEvent(PipelineEvent):
 
 
 class TranscriptionFailedEvent(PipelineEvent):
+    agent_request_id: str | None = Field(default=None, exclude=True)
     type: Literal["transcription_failed"] = "transcription_failed"
     message: str
     turn_id: str | None = None
@@ -203,3 +205,14 @@ class ResponseFailedEvent(PipelineEvent):
     turn_revision: int | None = None
     cancel_generation: int | None = None
     response_key: str | None = Field(default=None, exclude=True, repr=False)
+
+
+class AgentPermissionEvent(PipelineEvent):
+    """A session-scoped SDK interaction that bypasses response/TTS buffering."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    type: Literal["agent_permission"] = "agent_permission"
+    turn_id: str | None = None
+    turn_revision: int | None = None
+    event: BaseModel
+    response_key: str = Field(exclude=True)

@@ -332,3 +332,43 @@ transport pick, and `s2s.audio.inputId` / `s2s.audio.outputId` for devices).
 
 - Backend: [huggingface/speech-to-speech](https://github.com/huggingface/speech-to-speech)
 - UI verbatim from `amir-tfrere/minimal-conversation-app-s2s-backend` (Pollen Robotics × Hugging Face)
+
+For a backend that executes its own tools, such as `claude-agent-sdk`, set
+`SPEECH_TO_SPEECH_CLIENT_TOOLS=false` on the demo server. The demo then omits
+browser search/camera function definitions; the backend's native tools remain
+available.
+
+### Claude tool approvals
+
+With the `claude-agent-sdk` backend, pending native tool requests appear in a
+Claude requests panel with exact tool inputs and **Allow once** / **Deny**.
+You can also say **“approve request”** or **“deny request”** while one request is
+pending and your microphone is unmuted. These replies resume the same agent
+response. With multiple requests, use the buttons to identify the request.
+`AskUserQuestion` provides answer fields; a single question accepts a spoken
+answer as well. The server denies unanswered prompts after
+`--claude_agent_permission_timeout_s` (300 seconds by default).
+
+Both WebSocket and WebRTC carry the following custom events. Clients receive
+`speech_to_speech.agent.permission.requested` (`request_id`, `response_id`,
+`tool_name`, `input`, `title`, `description`, `timeout_s`) and reply using:
+
+```json
+{
+  "type": "speech_to_speech.agent.permission.reply",
+  "event_id": "my-reply",
+  "request_id": "the-request-id",
+  "decision": "allow"
+}
+```
+
+Use `"deny"` to decline. For `AskUserQuestion`, an allow reply also includes
+`"answers"`, mapping each question's full text to an answer string or an array
+of choices for a multi-select question. Replies are scoped to the current
+response and session; stale or duplicate replies produce a correlated error.
+`speech_to_speech.agent.permission.resolved` reports `allowed`, `denied`,
+`timed_out`, or `cancelled`. Spoken replies produce
+`speech_to_speech.agent.permission.voice` with the recognized transcript and
+an error if it did not resolve the request. Pending cards clear when the
+response ends or the call disconnects. Normal Claude permission rules may
+already approve or deny actions without an interactive prompt.

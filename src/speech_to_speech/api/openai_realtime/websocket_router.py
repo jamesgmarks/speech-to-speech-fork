@@ -20,6 +20,7 @@ from openai.types.realtime import (
     SessionUpdateEvent,
 )
 
+from speech_to_speech.agent_interactions import AgentPermissionReply
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
 from speech_to_speech.api.openai_realtime.service import (
@@ -414,7 +415,12 @@ async def _dispatch_client_event(
         )
         return
 
-    if isinstance(event, InputAudioBufferAppendEvent):
+    if isinstance(event, AgentPermissionReply):
+        err = service.handle_agent_permission_reply(session_id, event)
+        if err:
+            await send_correlated([err])
+
+    elif isinstance(event, InputAudioBufferAppendEvent):
         if transport_kind == "webrtc":
             await send_correlated(
                 [

@@ -46,6 +46,7 @@ class PipelineMessage(BaseModel):
 class VADAudio(PipelineMessage):
     """Audio segment from VAD, with optional mode for realtime transcription."""
 
+    agent_request_id: str | None = Field(default=None, exclude=True)
     tag: Literal["vad_audio"] = "vad_audio"
     audio: np.ndarray
     runtime_config: RuntimeConfig | None = None
@@ -64,6 +65,7 @@ class VADAudio(PipelineMessage):
 class PartialTranscription(PipelineMessage):
     """Live partial transcription (consumed by TranscriptionNotifier, not forwarded to LLM)."""
 
+    agent_request_id: str | None = Field(default=None, exclude=True)
     tag: Literal["partial_transcription"] = "partial_transcription"
     text: str
     turn_id: str | None = None
@@ -73,6 +75,7 @@ class PartialTranscription(PipelineMessage):
 class Transcription(PipelineMessage):
     """Final transcription result."""
 
+    agent_request_id: str | None = Field(default=None, exclude=True)
     tag: Literal["transcription"] = "transcription"
     text: str
     language_code: Optional[str] = None
@@ -84,6 +87,7 @@ class Transcription(PipelineMessage):
 class TranscriptionFailure(PipelineMessage):
     """A final STT operation failed without producing LLM input."""
 
+    agent_request_id: str | None = Field(default=None, exclude=True)
     tag: Literal["transcription_failure"] = "transcription_failure"
     message: str
     turn_id: str | None = None

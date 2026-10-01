@@ -75,6 +75,7 @@ LB_HF_TOKEN = os.environ.get("LB_HF_TOKEN", "").strip()
 # the LB address it is NOT a secret — /api/config sends it to the client, which
 # shows it read-only in Settings.
 SPEECH_TO_SPEECH_URL = os.environ.get("SPEECH_TO_SPEECH_URL", "").strip()
+CLIENT_TOOLS_ENABLED = os.environ.get("SPEECH_TO_SPEECH_CLIENT_TOOLS", "true").lower() not in {"0", "false", "no"}
 if SPEECH_TO_SPEECH_URL:
     LOAD_BALANCER_URL = ""
 # HF injects SPACE_ID ("owner/space") into every Space runtime; it's absent
@@ -206,6 +207,7 @@ def config():
     s2s server URL. The LB address itself is intentionally NOT included."""
     return {
         "search": bool(SERPER_KEY),
+        "clientTools": CLIENT_TOOLS_ENABLED,
         "lb": bool(LOAD_BALANCER_URL),
         "allowDirect": not LOAD_BALANCER_URL,
         # Deploy-pinned direct s2s URL (empty when unset). Not a secret: the

@@ -7,6 +7,8 @@ Runtime-supported values in `s2s_pipeline.py`:
 - `transformers` → `language_model.py` (Transformers backend)
 - `mlx-lm` → `language_model.py` (MLX backend)
 - `responses-api` → `responses_api_language_model.py`
+- `chat-completions` → `chat_completions_language_model.py`
+- `claude-agent-sdk` → `claude_agent_sdk_language_model.py`
 
 ## Usage
 
@@ -135,3 +137,32 @@ speech-to-speech serve \
   --model_name gpt-5.6-terra \
   --responses_api_api_key YOUR_API_KEY
 ```
+
+## Claude Code Agent SDK
+
+Install `speech-to-speech[claude-agent-sdk]` and select
+`--llm_backend claude-agent-sdk`. All Claude Code tools are available with
+normal Claude Code permission rules. `--claude_agent_cwd` selects the workspace;
+`--claude_agent_allowed_tools` supplies auto-approval rules without restricting
+the toolset. CLI authentication/provider environment is inherited by the SDK.
+Pending tool approvals are sent to the connected client through `can_use_tool`.
+The demo offers Allow once/Deny buttons and explicit spoken approvals; agent
+questions accept form answers or a spoken answer when there is one question.
+`--claude_agent_permission_timeout_s` bounds human wait (default 300 seconds),
+which is excluded from the generation deadline. No responder, timeout, or
+cancellation grants approval.
+
+Tune `--claude_agent_max_tokens`, `--claude_agent_effort`,
+`--claude_agent_thinking`, `--claude_agent_thinking_budget_tokens`,
+`--claude_agent_max_turns`, `--claude_agent_request_timeout_s`, and
+`--claude_agent_max_retries` to manage response time. Streaming defaults to
+one sentence per spoken batch. Output-token limits apply per model request,
+including thinking and tool-call output; Realtime token-limit overrides are
+also supported.
+
+Each public response starts a fresh SDK client with a snapshot of the pipeline
+conversation. Internal SDK tool transcripts are not persisted across voice
+turns, and Realtime client function tools, images, and direct audio input are
+unsupported. Hidden response prefetch is skipped. See the
+[main README](../../../README.md#claude-code-agent-sdk) for examples and all
+configuration options.

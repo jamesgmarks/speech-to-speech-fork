@@ -41,6 +41,8 @@ class TranscriptionNotifier(BaseHandler[STTOut, LLMIn]):
 
     def process(self, transcription: STTOut) -> Iterator[LLMIn]:
         if isinstance(transcription, PartialTranscription):
+            if transcription.agent_request_id is not None:
+                return
             if self.text_output_queue and transcription.text:
                 self.text_output_queue.put(
                     PartialTranscriptionEvent(
@@ -57,6 +59,7 @@ class TranscriptionNotifier(BaseHandler[STTOut, LLMIn]):
                 self.text_output_queue.put(
                     TranscriptionFailedEvent(
                         message=transcription.message,
+                        agent_request_id=transcription.agent_request_id,
                         turn_id=transcription.turn_id,
                         turn_revision=transcription.turn_revision,
                     )
@@ -84,6 +87,7 @@ class TranscriptionNotifier(BaseHandler[STTOut, LLMIn]):
             self.text_output_queue.put(
                 TranscriptionCompletedEvent(
                     transcript=transcript,
+                    agent_request_id=getattr(transcription, "agent_request_id", None),
                     language_code=language_code,
                     turn_id=turn_id,
                     turn_revision=turn_revision,

@@ -451,3 +451,9 @@ if (!root.innerHTML.includes("signin-pill")) {
         capture_output=True,
         text=True,
     )
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_config_advertises_browser_tool_availability(monkeypatch, enabled):
+    monkeypatch.setattr(demo_server, "CLIENT_TOOLS_ENABLED", enabled)
+    assert demo_server.config()["clientTools"] is enabled

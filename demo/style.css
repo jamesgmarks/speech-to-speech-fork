@@ -2752,3 +2752,31 @@ body.cam-on .footer {
 }
 .hist-timings p { margin: 8px 0; line-height: 1.5; }
 .hist-timings .timing-status { color: var(--text); }
+
+/* Agent permission requests remain visible while the microphone listens. */
+.agent-permissions {
+  position: fixed;
+  right: 16px;
+  bottom: 20px;
+  z-index: 100;
+  width: min(480px, calc(100vw - 32px));
+  max-height: 75vh;
+  overflow: auto;
+  color: #202020;
+  background: #fff;
+  border: 1px solid #d5d5d5;
+  border-radius: 16px;
+  box-shadow: 0 8px 36px #0003;
+}
+.agent-permissions[hidden] { display: none; }
+.agent-permission-card { padding: 20px; border-bottom: 1px solid #ddd; }
+.agent-permission-card h2 { font-size: 18px; margin: 0 0 12px; }
+.agent-permission-card p { font-size: 14px; line-height: 1.5; margin: 8px 0; }
+.agent-permission-card pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-height: 200px; overflow: auto; background: #f3f3f3; padding: 12px; border-radius: 8px; }
+.agent-permission-card label { display: block; margin: 12px 0; font-size: 14px; }
+.agent-permission-card input { width: 100%; padding: 10px; border: 1px solid #999; border-radius: 6px; }
+.agent-permission-hint { color: #555; }
+.agent-permission-actions { display: flex; gap: 12px; margin-top: 14px; }
+.agent-permission-actions button { cursor: pointer; border: 1px solid #aaa; border-radius: 8px; padding: 10px 18px; color: #222; background: #fff; }
+.agent-permission-actions button[type="submit"] { background: #222; color: #fff; }
+.agent-permission-actions button:disabled { opacity: .5; cursor: wait; }

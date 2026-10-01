@@ -541,6 +541,15 @@ export class S2sRealtimeClient extends EventTarget {
     if (typeof type !== "string") return;
     if (this._debug) console.debug(`[${this.options.transport}]`, event);
     switch (type) {
+      case "speech_to_speech.agent.permission.requested":
+        this.dispatchEvent(new CustomEvent("agent-permission-requested", { detail: event }));
+        break;
+      case "speech_to_speech.agent.permission.resolved":
+        this.dispatchEvent(new CustomEvent("agent-permission-resolved", { detail: event }));
+        break;
+      case "speech_to_speech.agent.permission.voice":
+        this.dispatchEvent(new CustomEvent("agent-permission-voice", { detail: event }));
+        break;
       case "response.output_audio.delta": {
         if (this.options.transport !== "websocket" || event.response_id !== this._playbackResponseId) break;
         const key = JSON.stringify([event.item_id, event.content_index]);
@@ -710,6 +719,12 @@ export class S2sRealtimeClient extends EventTarget {
       }
       case "error": {
         const message = event.error?.message ?? "Server error";
+        const eventId = event.error?.event_id;
+        if (typeof eventId === "string" && eventId.startsWith("agent_permission_")) {
+          this.dispatchEvent(new CustomEvent("agent-permission-error", { detail: {
+            request_id: eventId.slice("agent_permission_".length), error: message,
+          } }));
+        }
         this.dispatchEvent(new CustomEvent("server-error", { detail: { error: new Error(message) } }));
         break;
       }
@@ -726,6 +741,11 @@ export class S2sRealtimeClient extends EventTarget {
   _markAudible() {
     if (this._status === "closed" || this._status === "error") return;
     this._setStatus("ai-speaking");
+  }
+
+  /** Reply to one pending server-side Claude request over either transport. */
+  replyAgentPermission(reply) {
+    this._transport?.sendEvent({ type: "speech_to_speech.agent.permission.reply", event_id: `agent_permission_${reply.request_id}`, ...reply });
   }
 
   /** @param {{voice?: string, instructions?: string}} patch */

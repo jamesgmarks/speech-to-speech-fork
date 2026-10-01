@@ -21,6 +21,8 @@ import { S2sRealtimeClient, normalizePlaybackBufferMs } from "./s2s-realtime-cli
 import { $, truncateError, DEBUG } from "./ui/dom.js";
 import { ChatView } from "./ui/chat.js";
 import { Account } from "./ui/account.js";
+import { AgentPermissions } from "./ui/agent-permissions.js";
+
 
 const DEFAULT_VOICE = "Aiden";
 const DEFAULT_INSTRUCTIONS = "You are a friendly voice assistant.";
@@ -337,6 +339,8 @@ let activeTransport = "ws";
 let toolsEnabled = loadTools();
 // Whether the server holds a Serper key (learned from /api/config on load).
 let serverSearchKey = false;
+// Agent backends can execute tools themselves without browser function tools.
+let clientToolsAvailable = true;
 // A user-supplied key (fallback when the deploy has none). localStorage only.
 let userSearchKey = localStorage.getItem(STORAGE_KEYS.searchKey) || "";
 /** @type {MediaStream | null} */
@@ -349,6 +353,7 @@ function searchAvailable() {
 
 /** Tool definitions for the currently-enabled (and usable) tools. */
 function activeToolDefs() {
+  if (!clientToolsAvailable) return [];
   const defs = [];
   if (toolsEnabled.web_search && searchAvailable()) defs.push(TOOL_DEFS.web_search);
   if (toolsEnabled.camera_snapshot) defs.push(TOOL_DEFS.camera_snapshot);
@@ -377,6 +382,7 @@ const chat = new ChatView({
 // server meters conversation time; the client just heartbeats a live session
 // and tears down when the server reports the budget is spent.
 const account = new Account();
+const agentPermissions = new AgentPermissions();
 let limiterOn = false;
 let heartbeatTimer = 0;
 let trackedSessionId = "";
@@ -614,6 +620,17 @@ aboutModal.addEventListener("click", (e) => {
 
 /** Reflect the current tool state into the panel controls. */
 function syncToolsUi() {
+  toolCamSwitch.disabled = !clientToolsAvailable;
+  if (!clientToolsAvailable) {
+    toolWebSwitch.checked = false;
+    toolCamSwitch.checked = false;
+    toolWebSwitch.disabled = true;
+    toolWebRow.classList.add("disabled");
+    searchKeyInput.disabled = true;
+    toolWebHint.textContent = "This server runs its own tools. Browser search is unavailable.";
+    toolCamHint.textContent = "Camera snapshots are unavailable with this server.";
+    return;
+  }
   const avail = searchAvailable();
   toolWebSwitch.checked = toolsEnabled.web_search && avail;
   toolWebSwitch.disabled = !avail;
@@ -730,7 +747,7 @@ function disableCamera() {
  *  user declines the permission, switch the tool off and reflect it in the UI
  *  rather than nagging. */
 async function autoStartCamera() {
-  if (!toolsEnabled.camera_snapshot || cameraStream) return;
+  if (!clientToolsAvailable || !toolsEnabled.camera_snapshot || cameraStream) return;
   try {
     await enableCamera();
   } catch (err) {
@@ -899,6 +916,7 @@ async function fetchConfig() {
     if (res.ok) {
       const json = await res.json();
       serverSearchKey = !!json.search;
+      clientToolsAvailable = json.clientTools !== false;
       lbMode = !!json.lb;
       // Lock to LB mode only when the deploy reports a load balancer.
       allowDirect = json.allowDirect ?? !lbMode;
@@ -1487,12 +1505,21 @@ async function doStart(audioContext = null) {
     chat.onUserAudio(detail);
   });
 
+  c.addEventListener("agent-permission-requested", e => {
+    if (client === c) agentPermissions.requested(e.detail, reply => c.replyAgentPermission(reply));
+  });
+  c.addEventListener("agent-permission-resolved", e => agentPermissions.resolved(e.detail));
+  c.addEventListener("agent-permission-voice", e => agentPermissions.voice(e.detail));
+  c.addEventListener("agent-permission-error", e => agentPermissions.error(e.detail));
+
   c.addEventListener("response-finished", (e) => {
     const detail = /** @type {CustomEvent<{ responseId: string; status: string; audible?: boolean; transcript?: string; latency?: import("./turn-latency.js").TurnLatency | null }>} */ (e).detail;
     chat.onResponseFinished(detail);
+    agentPermissions.finish(detail.responseId);
   });
   c.addEventListener("error", (e) => {
     const detail = /** @type {CustomEvent<{ error: unknown }>} */ (e).detail;
+    agentPermissions.clear();
     void onFatalError(detail.error);
   });
   c.addEventListener("server-error", (e) => {
@@ -1644,6 +1671,7 @@ function onClientStatus(status) {
 }
 
 async function teardown() {
+  agentPermissions.clear();
   stopHeartbeat();
   stopJoinCountdown();
   endTrackedSession();
@@ -1688,10 +1716,9 @@ async function onFatalError(err) {
 setState("idle");
 chat.renderEmptyState();
 initGateArc();
-void fetchConfig();
+void fetchConfig().then(() => autoStartCamera());
 // Start the webcam as soon as the user lands (camera tool defaults on), and
 // react to later permission changes (re-grant after a denial re-enables it).
-void autoStartCamera();
 void watchCameraPermission();
 
 // Reconcile a live session if the tab is closed/hidden mid-call (no teardown).

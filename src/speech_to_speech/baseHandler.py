@@ -13,7 +13,16 @@ import numpy as np
 from speech_to_speech.pipeline.control import PipelineControlMessage, is_control_message, SESSION_END
 from speech_to_speech.pipeline.events import PipelineEvent, TokenUsageEvent
 from speech_to_speech.pipeline.log_context import pipeline_log_ctx
-from speech_to_speech.pipeline.messages import PIPELINE_END, AudioOutput, EndOfResponse, TTSInput
+from speech_to_speech.pipeline.messages import (
+    PIPELINE_END,
+    AudioOutput,
+    EndOfResponse,
+    TTSInput,
+    VADAudio,
+    PartialTranscription,
+    Transcription,
+    TranscriptionFailure,
+)
 from speech_to_speech.pipeline.transcript_logging import log_exception
 
 logger = logging.getLogger(__name__)
@@ -87,6 +96,12 @@ class BaseHandler(Generic[InT, OutT]):
         pass
 
     def output_for_queue(self, output: OutT, source_input: InT) -> OutT | AudioOutput:
+        if (
+            isinstance(source_input, VADAudio)
+            and source_input.agent_request_id is not None
+            and isinstance(output, (PartialTranscription, Transcription, TranscriptionFailure))
+        ):
+            output.agent_request_id = source_input.agent_request_id
         cancel_generation = getattr(source_input, "cancel_generation", None)
         response_key = getattr(source_input, "response_key", None)
         cleanup_only = getattr(source_input, "cleanup_only", False)
