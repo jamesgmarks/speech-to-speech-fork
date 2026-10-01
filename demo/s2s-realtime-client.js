@@ -247,6 +247,7 @@ export class S2sRealtimeClient extends EventTarget {
       url = target.href;
     }
     this._conversationResumed = false;
+    this._conversationRestoreError = null;
     let restoreTimer;
     const restored = this.options.conversationKey ? new Promise((resolve) => {
       this._conversationReady = resolve;
@@ -256,6 +257,7 @@ export class S2sRealtimeClient extends EventTarget {
       if (restored) await Promise.race([restored, new Promise((_, reject) => {
         restoreTimer = setTimeout(() => reject(new Error("Conversation restore was not acknowledged")), 10000);
       })]);
+      if (this._conversationRestoreError) throw this._conversationRestoreError;
     } finally {
       clearTimeout(restoreTimer);
       this._conversationReady = null;
@@ -564,6 +566,9 @@ export class S2sRealtimeClient extends EventTarget {
     switch (type) {
       case "session.created": {
         const conversation = event.session?.speech_to_speech_conversation;
+        if (this.options.conversationKey && conversation?.key !== this.options.conversationKey) {
+          this._conversationRestoreError = new Error("The speech service did not acknowledge this conversation. Update the service and reconnect; your saved history has been kept.");
+        }
         if (conversation) {
           this._conversationResumed = conversation.resumed === true;
           this.dispatchEvent(new CustomEvent("conversation-restored", { detail: conversation }));

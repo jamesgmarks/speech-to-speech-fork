@@ -53,8 +53,8 @@ import httpx
 import limiter
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from static_assets import DemoStaticFiles
 
 logger = logging.getLogger("s2s.search")
 
@@ -703,4 +703,4 @@ async def session_end(request: Request):
 
 # Static front-end. Registered last so the /api routes win. `html=True` serves
 # index.html at "/". The repo is public anyway, so serving the dir is fine.
-app.mount("/", StaticFiles(directory=HERE, html=True), name="static")
+app.mount("/", DemoStaticFiles(directory=HERE, html=True), name="static")

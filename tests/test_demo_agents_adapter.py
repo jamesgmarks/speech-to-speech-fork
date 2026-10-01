@@ -132,6 +132,34 @@ for (const transport of ["websocket", "webrtc"]) {
     )
 
 
+def test_persistent_client_does_not_greet_when_service_loses_its_identity():
+    _run_node(
+        """
+import assert from "node:assert/strict";
+globalThis.location = { href: "https://demo.test/" };
+globalThis.localStorage = { getItem() { return null; } };
+globalThis.CustomEvent = class extends Event { constructor(type, init={}) { super(type); this.detail=init.detail; } };
+let greetingSent = false;
+let ack;
+class Transport { constructor() { this.listeners=new Map(); } on(name, callback) { this.listeners.set(name, callback); } }
+class Session {
+  constructor(agent, options) { this.options=options; }
+  on() {}
+  async connect() { this.options.transport.listeners.get("*")({type:"session.created", session:ack}); }
+  sendMessage() { greetingSent = true; }
+}
+globalThis.OpenAIAgentsRealtime = { OpenAIRealtimeWebSocket:Transport, RealtimeSession:Session, RealtimeAgent:class {constructor(options){Object.assign(this,options);}} };
+const { S2sRealtimeClient } = await import("./demo/s2s-realtime-client.js");
+for (ack of [{}, {speech_to_speech_conversation:{key:"another-conversation",resumed:false}}]) {
+  const client = new S2sRealtimeClient({transport:"websocket",directUrl:"ws://example.test/v1/realtime",conversationKey:"88edaf87-91f2-4fc3-a153-7b5355fdd7d5",startupGreeting:"Say hello",micStream:{getAudioTracks(){return [{}];}}});
+  client._setupAudio=async()=>{};
+  await assert.rejects(client.connect(), /did not acknowledge this conversation/);
+  assert.equal(greetingSent,false);
+}
+"""
+    )
+
+
 def test_websocket_audio_setup_requires_the_versioned_24khz_worklet():
     _run_node(
         """

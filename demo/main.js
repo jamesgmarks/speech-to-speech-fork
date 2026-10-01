@@ -17,7 +17,7 @@
  * @typedef {S2sRealtimeClient} RealtimeClient
  */
 
-import { S2sRealtimeClient, normalizePlaybackBufferMs } from "./s2s-realtime-client.js?v=audio-24k-v2";
+import { S2sRealtimeClient, normalizePlaybackBufferMs } from "./s2s-realtime-client.js";
 import { $, truncateError, DEBUG } from "./ui/dom.js";
 import { ChatView } from "./ui/chat.js";
 import { AgentSessions } from "./ui/agent-sessions.js";
@@ -297,6 +297,8 @@ const mgaHit = /** @type {SVGPathElement} */ (document.querySelector("#mga-hit")
 const mgaHandle = /** @type {SVGCircleElement} */ (document.querySelector("#mga-handle"));
 /** @type {HTMLButtonElement} */
 const restartBtn = $("#restart-conversation");
+/** @type {HTMLButtonElement} */
+const newConversationBtn = $("#new-conversation");
 /** @type {HTMLElement} */
 const restartHint = $("#restart-hint");
 const settingsForm = /** @type {HTMLFormElement} */ (settingsModal.querySelector("form"));
@@ -457,10 +459,11 @@ function updateRestartAvailability() {
   // while waiting in the queue (restarting from there would just re-queue).
   restartBtn.disabled =
     currentState === "connecting" || currentState === "queued" || currentState === "your-turn";
+  newConversationBtn.disabled = restartBtn.disabled;
   restartHint.hidden = false;
   restartHint.textContent = LIVE_STATES.has(currentState)
-    ? "Reconnects now with the settings above."
-    : "Starts a conversation with the settings above.";
+    ? "Reconnects with these settings and keeps the current conversation."
+    : "Resumes the conversation with these settings.";
 }
 
 /**
@@ -1154,7 +1157,7 @@ inputTransport.addEventListener("change", () => {
   syncTransportUi();
 });
 
-restartBtn.addEventListener("click", async () => {
+async function startWithSettings(fresh = false) {
   if (currentState === "connecting") return; // a connect is already underway
   settings = readSettingsFromForm();
   saveSettings(settings);
@@ -1165,11 +1168,14 @@ restartBtn.addEventListener("click", async () => {
   const audioContext = createResumedAudioContext();
   try {
     if (client) await teardown();
+    if (fresh) chat.startNewConversation();
     await doStart(audioContext);
   } catch (err) {
     await handleStartError(err);
   }
-});
+}
+restartBtn.addEventListener("click", () => startWithSettings());
+newConversationBtn.addEventListener("click", () => startWithSettings(true));
 
 circleBtn.addEventListener("click", async () => {
   try {
