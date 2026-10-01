@@ -108,6 +108,8 @@ class SessionHandler(RealtimeBaseHandler):
                     }
                 }
             )
+        if cfg.agent_permission_mode is not None:
+            session = session.model_copy(update={"speech_to_speech_permission_mode": cfg.agent_permission_mode})
         return SessionCreatedEvent(
             type="session.created",
             event_id=self._next_event_id(),

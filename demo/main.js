@@ -385,6 +385,7 @@ const chat = new ChatView({
 // and tears down when the server reports the budget is spent.
 const account = new Account();
 const agentPermissions = new AgentPermissions();
+document.getElementById("permission-mode")?.addEventListener("change", e => client?.setAgentPermissionMode(/** @type {HTMLSelectElement} */ (e.target).value));
 let limiterOn = false;
 let heartbeatTimer = 0;
 let trackedSessionId = "";
@@ -1543,6 +1544,13 @@ async function doStart(audioContext = null) {
   });
   c.addEventListener("agent-permission-resolved", e => agentPermissions.resolved(e.detail));
   c.addEventListener("agent-permission-voice", e => agentPermissions.voice(e.detail));
+  c.addEventListener("agent-permission-mode", e => {
+    if (client !== c) return;
+    const select = /** @type {HTMLSelectElement} */ (document.getElementById("permission-mode"));
+    if (!Array.from(select.options).some(o => o.value === e.detail.mode)) select.add(new Option(e.detail.mode, e.detail.mode));
+    select.value = e.detail.mode;
+    select.disabled = false;
+  });
   c.addEventListener("agent-permission-error", e => agentPermissions.error(e.detail));
 
   c.addEventListener("response-finished", (e) => {

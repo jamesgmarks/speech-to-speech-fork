@@ -568,9 +568,14 @@ export class S2sRealtimeClient extends EventTarget {
           this._conversationResumed = conversation.resumed === true;
           this.dispatchEvent(new CustomEvent("conversation-restored", { detail: conversation }));
         }
+        const permissionMode = event.session?.speech_to_speech_permission_mode;
+        if (permissionMode) this.dispatchEvent(new CustomEvent("agent-permission-mode", { detail: { mode: permissionMode } }));
         this._conversationReady?.();
         break;
       }
+      case "speech_to_speech.agent.permission_mode":
+        this.dispatchEvent(new CustomEvent("agent-permission-mode", { detail: event }));
+        break;
       case "speech_to_speech.voices":
         this.dispatchEvent(new CustomEvent("voice-catalog", { detail: event }));
         break;
@@ -779,6 +784,11 @@ export class S2sRealtimeClient extends EventTarget {
   /** Reply to one pending server-side Claude request over either transport. */
   replyAgentPermission(reply) {
     this._transport?.sendEvent({ type: "speech_to_speech.agent.permission.reply", event_id: `agent_permission_${reply.request_id}`, ...reply });
+  }
+
+  /** Switch the Claude permission mode; applies from the next Claude turn. */
+  setAgentPermissionMode(mode) {
+    this._transport?.sendEvent({ type: "speech_to_speech.agent.permission_mode.set", mode });
   }
 
   /** @param {{voice?: string, instructions?: string}} patch */

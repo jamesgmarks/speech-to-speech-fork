@@ -529,6 +529,7 @@ def _build_pipeline_unit(
         turn_latency_store=turn_latency_store,
         default_instructions=default_instructions,
         llm_backend=llm_selection.name,
+        default_agent_permission_mode=llm_selection.config.get("permission_mode"),
     )
 
     if module_kwargs.enable_live_transcription and not stt_selection.spec.capabilities.streams_audio_chunks:

@@ -213,6 +213,8 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
         if optional_kwargs.get("compaction"):
             sdk_kwargs.update(tools=[], allowed_tools=[], mcp_servers={}, strict_mcp_config=True, setting_sources=[])
         turn = optional_kwargs.get("turn")
+        if turn is not None and turn.runtime_config.agent_permission_mode and not optional_kwargs.get("compaction"):
+            sdk_kwargs["permission_mode"] = turn.runtime_config.agent_permission_mode
         stream_ref: list[_ClaudeStream] = []
 
         def owned_stream() -> _ClaudeStream | None:

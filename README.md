@@ -694,6 +694,11 @@ Realtime `session.max_response_output_tokens` and per-response
 `response.max_output_tokens` integer values override the CLI cap for that
 request. Thinking and effort support depends on the selected model.
 
+The conversation panel's **Claude permissions** selector changes permission mode
+for subsequent Claude voice turns in the connected call. It offers Standard,
+Accept edits, Auto-allow (bypass), and Plan; existing worker sessions keep their
+own permission settings. It leaves global Claude Code settings unchanged.
+
 The adapter supplies the current pipeline conversation as a JSON transcript to
 a fresh SDK client for each response. This preserves edited history,
 out-of-band contexts, and cancellation rollback without leaking CLI sessions

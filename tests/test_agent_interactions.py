@@ -199,3 +199,14 @@ def test_permission_audio_bypasses_listening_gate_and_speculative_turn_creation(
     assert list(vad.process((bytes(1024), config))) == []
     assert vad.iterator.min_silence_samples == 1024
     assert tracker.is_latest(turn, revision)
+
+
+def test_permission_mode_set_updates_runtime_config_and_reports_mode():
+    service = RealtimeService(default_agent_permission_mode="default")
+    session = service.register()
+    config = service._state(session).runtime_config
+    assert config.agent_permission_mode == "default"
+    event = service.parse_client_event({"type": "speech_to_speech.agent.permission_mode.set", "mode": "plan"})
+    assert service.handle_agent_permission_mode_set(session, event).mode == "plan"
+    assert config.agent_permission_mode == "plan"
+    assert service.parse_client_event({"type": "speech_to_speech.agent.permission_mode.set", "mode": "bogus"}) is None

@@ -236,3 +236,4 @@ node_modules/
 # Local workspace files
 .DS_Store
 /TODO.md
+/.claude/worktrees/

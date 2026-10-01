@@ -20,7 +20,7 @@ from openai.types.realtime import (
     SessionUpdateEvent,
 )
 
-from speech_to_speech.agent_interactions import AgentPermissionReply
+from speech_to_speech.agent_interactions import AgentPermissionModeSet, AgentPermissionReply
 from speech_to_speech.agent_session_inventory import AgentSessionInventory
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
@@ -421,7 +421,10 @@ async def _dispatch_client_event(
         )
         return
 
-    if isinstance(event, AgentPermissionReply):
+    if isinstance(event, AgentPermissionModeSet):
+        await send_correlated([service.handle_agent_permission_mode_set(session_id, event)])
+
+    elif isinstance(event, AgentPermissionReply):
         err = service.handle_agent_permission_reply(session_id, event)
         if err:
             await send_correlated([err])

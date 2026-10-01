@@ -1861,6 +1861,8 @@ body:not(.chat-panel-collapsed) .bubble-stack {
 }
 
 .chat-history[hidden], .agent-sessions[hidden] { display: none; }
+.permission-mode { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 20px; border-bottom: 1px solid var(--border); color: var(--text-dim); }
+.permission-mode select { color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; }
 .session-tabs { display: flex; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--border); }
 .session-tabs button, .agent-sessions button { color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; cursor: pointer; font: inherit; }
 .session-tabs button[aria-pressed="true"] { background: var(--bg); border-color: #8f79ed; }

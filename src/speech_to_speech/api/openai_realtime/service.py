@@ -48,6 +48,8 @@ from openai.types.realtime.realtime_response_create_params import RealtimeRespon
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from speech_to_speech.agent_interactions import (
+    AgentPermissionModeChanged,
+    AgentPermissionModeSet,
     AgentPermissionReply,
     AgentPermissionRequested,
     AgentPermissionResolved,
@@ -108,6 +110,7 @@ _EVENT_TYPE_TO_MODEL: dict[str, type[BaseModel]] = {
     "output_audio_buffer.clear": OutputAudioBufferClearEvent,
     "session.update": SessionUpdateEvent,
     "speech_to_speech.agent.permission.reply": AgentPermissionReply,
+    "speech_to_speech.agent.permission_mode.set": AgentPermissionModeSet,
     "conversation.item.create": ConversationItemCreateEvent,
     "conversation.item.truncate": ConversationItemTruncateEvent,
     "response.create": ResponseCreateEvent,
@@ -115,6 +118,7 @@ _EVENT_TYPE_TO_MODEL: dict[str, type[BaseModel]] = {
 }
 
 ClientEvent = Union[
+    AgentPermissionModeSet,
     AgentPermissionReply,
     InputAudioBufferAppendEvent,
     InputAudioBufferCommitEvent,
@@ -140,6 +144,7 @@ class AgentBackgroundStatus(BaseModel):
 
 ServerEvent = Union[
     AgentBackgroundStatus,
+    AgentPermissionModeChanged,
     VoiceCatalogEvent,
     AgentPermissionRequested,
     AgentPermissionResolved,
@@ -362,6 +367,7 @@ class RealtimeService:
         turn_latency_store: TurnLatencyStore | None = None,
         default_instructions: str | None = None,
         llm_backend: str = "unknown",
+        default_agent_permission_mode: str | None = None,
     ) -> None:
         self.text_prompt_queue = text_prompt_queue
         self.should_listen = should_listen
@@ -372,6 +378,7 @@ class RealtimeService:
             speculative_turns.wait_observer = self.turn_latency_store.record_smart_wait
         self._default_instructions = default_instructions
         self.llm_backend = llm_backend
+        self.default_agent_permission_mode = default_agent_permission_mode
         self.conversation_store: ConversationStore | None = None
         # None means the active backend does not declare a complete language set.
         self.stt_supported_languages: set[str] | None = None
@@ -421,6 +428,7 @@ class RealtimeService:
                     type="realtime",
                     instructions=self._default_instructions,
                 ),
+                agent_permission_mode=self.default_agent_permission_mode,
             ),
         )
         self._conns[state.session_id] = state
@@ -611,6 +619,11 @@ class RealtimeService:
         self.response.maybe_start_tool_followup_prefetch(conn_id)
         self.checkpoint(conn_id)
         return events
+
+    def handle_agent_permission_mode_set(self, conn_id: str, event: AgentPermissionModeSet) -> AgentPermissionModeChanged:
+        # Applies from the next Claude turn: each turn builds its own SDK client.
+        self._state(conn_id).runtime_config.agent_permission_mode = event.mode
+        return AgentPermissionModeChanged(mode=event.mode)
 
     def handle_agent_permission_reply(self, conn_id: str, event: AgentPermissionReply) -> RealtimeErrorEvent | None:
         st = self._state(conn_id)

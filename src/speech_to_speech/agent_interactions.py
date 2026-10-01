@@ -21,6 +21,22 @@ class AgentPermissionReply(BaseModel):
     event_id: str | None = None
 
 
+AgentPermissionModeName = Literal["default", "acceptEdits", "bypassPermissions", "plan"]
+
+
+class AgentPermissionModeSet(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    type: Literal["speech_to_speech.agent.permission_mode.set"]
+    mode: AgentPermissionModeName
+    event_id: str | None = None
+
+
+class AgentPermissionModeChanged(BaseModel):
+    type: Literal["speech_to_speech.agent.permission_mode"] = "speech_to_speech.agent.permission_mode"
+    mode: str
+    event_id: str = Field(default_factory=lambda: uuid4().hex)
+
+
 @dataclass
 class AgentRequest:
     request_id: str
