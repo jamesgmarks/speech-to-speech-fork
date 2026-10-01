@@ -77,6 +77,10 @@ LB_HF_TOKEN = os.environ.get("LB_HF_TOKEN", "").strip()
 # the LB address it is NOT a secret — /api/config sends it to the client, which
 # shows it read-only in Settings.
 SPEECH_TO_SPEECH_URL = os.environ.get("SPEECH_TO_SPEECH_URL", "").strip()
+# Reverse proxies can expose a different browser address while HTTP API
+# proxies continue to use the private backend above.
+SPEECH_TO_SPEECH_PUBLIC_URL = os.environ.get("SPEECH_TO_SPEECH_PUBLIC_URL", "").strip()
+RTC_ENABLED = os.environ.get("SPEECH_TO_SPEECH_RTC", "true").lower() not in {"0", "false", "no"}
 CLIENT_TOOLS_ENABLED = os.environ.get("SPEECH_TO_SPEECH_CLIENT_TOOLS", "true").lower() not in {"0", "false", "no"}
 if SPEECH_TO_SPEECH_URL:
     LOAD_BALANCER_URL = ""
@@ -214,11 +218,11 @@ def config():
         "allowDirect": not LOAD_BALANCER_URL,
         # Deploy-pinned direct s2s URL (empty when unset). Not a secret: the
         # browser dials it itself, and Settings shows it locked.
-        "s2sUrl": SPEECH_TO_SPEECH_URL,
+        "s2sUrl": (SPEECH_TO_SPEECH_PUBLIC_URL or SPEECH_TO_SPEECH_URL) if SPEECH_TO_SPEECH_URL else "",
         # WebRTC transport availability: the /api/calls proxy only forwards to
         # the env-pinned URL (never a client-supplied one), so the toggle is
         # offered exactly when that URL exists.
-        "rtc": bool(SPEECH_TO_SPEECH_URL),
+        "rtc": bool(SPEECH_TO_SPEECH_URL) and RTC_ENABLED,
         "iceServers": RTC_ICE_SERVERS,
         "startupGreeting": STARTUP_GREETING,
         "auth": AUTH_ENABLED,

@@ -610,3 +610,33 @@ if (!root.innerHTML.includes("signin-pill")) {
 def test_config_advertises_browser_tool_availability(monkeypatch, enabled):
     monkeypatch.setattr(demo_server, "CLIENT_TOOLS_ENABLED", enabled)
     assert demo_server.config()["clientTools"] is enabled
+
+
+async def test_tunnel_public_url_does_not_change_private_api_target(monkeypatch):
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "ws://127.0.0.1:8765/v1/realtime")
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_PUBLIC_URL", "wss://voice.example.com/v1/realtime")
+    monkeypatch.setattr(demo_server, "RTC_ENABLED", False)
+    requested = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            requested.append(url)
+            return httpx.Response(200, json={"voices": []}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", Client)
+    config = demo_server.config()
+    assert config["s2sUrl"] == "wss://voice.example.com/v1/realtime"
+    assert config["rtc"] is False
+    await demo_server.voices()
+    assert requested == ["http://127.0.0.1:8765/v1/voices"]
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "")
+    assert demo_server.config()["s2sUrl"] == ""

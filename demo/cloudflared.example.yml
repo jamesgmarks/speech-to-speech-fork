@@ -1,0 +1,16 @@
+# Populate outside the repository, e.g. ~/.cloudflared/speech-to-speech.yml.
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: /absolute/path/to/YOUR_TUNNEL_UUID.json
+originRequest:
+  access:
+    required: true
+    teamName: YOUR_ACCESS_TEAM
+    audTag:
+      - YOUR_ACCESS_APPLICATION_AUD
+ingress:
+  - hostname: voice.example.com
+    path: ^/v1/realtime$
+    service: http://127.0.0.1:8765
+  - hostname: voice.example.com
+    service: http://127.0.0.1:7861
+  - service: http_status:404

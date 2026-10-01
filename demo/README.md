@@ -99,16 +99,56 @@ Validation: `npm run test:agents:adapter` checks parsing and adapter behavior;
    >   *host*, where `host.docker.internal` is not a real DNS name, so the
    >   connection never reaches the backend and the server logs nothing.
    >
-   > A single Docker `SPEECH_TO_SPEECH_URL` can therefore only make one transport
-   > work at a time (`localhost:8765` for WebSocket, `host.docker.internal:8765`
-   > for WebRTC). To exercise **both** without swapping the env, run the demo
-   > **without Docker** (the `uvicorn` command above) so host and container
-   > namespaces collapse — then `ws://localhost:8765/v1/realtime` works for both.
+   > Set `SPEECH_TO_SPEECH_PUBLIC_URL=ws://localhost:8765/v1/realtime` for
+   > the browser while keeping `SPEECH_TO_SPEECH_URL` pointed at
+   > `host.docker.internal`. Without Docker, the same localhost URL works
+   > for both.
 
 3. Open <http://localhost:7860/>, click the orb, allow the mic, talk.
 
 > Browsers require **HTTPS or `localhost`** for `getUserMedia()` (mic + camera).
 > `127.0.0.1` and `localhost` both work; plain `http://192.168.x.y` does NOT.
+
+### Protected Cloudflare Tunnel
+
+Keep the speech backend on loopback. Configure a self-hosted Cloudflare Access
+application for the **entire public hostname**, with an Allow policy limited to
+your login email, before publishing DNS or starting the tunnel. Enable an
+identity provider (for example, email one-time PIN). The UI, API routes, and
+WebSocket must share that protected hostname so browser authentication cookies
+also protect voice connections.
+
+Start a separate demo instance without disturbing the local UI or running agents:
+
+```bash
+export SPEECH_TO_SPEECH_URL=ws://127.0.0.1:8765/v1/realtime
+export SPEECH_TO_SPEECH_PUBLIC_URL=wss://voice.example.com/v1/realtime
+export SPEECH_TO_SPEECH_RTC=false
+export SPEECH_TO_SPEECH_CLIENT_TOOLS=false # SDK-backed deployment; native agent tools remain enabled
+uv run uvicorn --app-dir demo server:app --host 127.0.0.1 --port 7861
+```
+
+The public URL is advertised to the browser only; voice catalogs, session lists,
+and permission controls still use the private `SPEECH_TO_SPEECH_URL`. Disable
+WebRTC for this deployment because the HTTP tunnel carries WebSockets but does
+not carry the direct peer connection's UDP media.
+
+Use the example [tunnel configuration](cloudflared.example.yml), substituting
+your tunnel ID, credentials path, hostname, Access team name, and application AUD
+tag. Its origin validation rejects requests without a valid Access JWT on both
+routes. Keep credentials and the populated deployment config outside the repo.
+
+```bash
+cloudflared tunnel --origincert ~/.cloudflared/personal-cert.pem create speech-to-speech
+# Create and verify Access protection first, then publish the hostname:
+cloudflared tunnel --origincert ~/.cloudflared/personal-cert.pem route dns speech-to-speech voice.example.com
+cloudflared tunnel --config ~/.cloudflared/speech-to-speech.yml ingress validate
+cloudflared tunnel --config ~/.cloudflared/speech-to-speech.yml run speech-to-speech
+```
+
+Confirm unauthenticated requests to `/`, `/api/config`, and `/v1/realtime` receive
+the Access login redirect or a denial. Then sign in and test the microphone and
+voice response over HTTPS. The Mac and local backend must remain running.
 
 Smoke-test the backend from the shell:
 
