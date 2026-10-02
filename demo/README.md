@@ -19,6 +19,36 @@ backend, speaking the OpenAI Realtime **GA** protocol over **WebSocket**
 (default) or **WebRTC** (Settings → Transport, env-pinned deploys only — see
 [WebRTC transport](#webrtc-transport)).
 
+## Start the configured personal app
+
+From the repository root, run `npm start` (or `npm start --prefix demo`). This
+uses `.venv/bin/python` and the existing
+[`start-with-my-voice-claude.py`](../voice-references/james/start-with-my-voice-claude.py)
+configuration: Claude Sonnet, 2,048 response tokens, low effort, one retry,
+Parakeet transcription, and the cached 6-bit Qwen3-TTS model with streaming chunk
+size 12 and the local custom voice catalog.
+
+The launcher waits for the backend, then starts the localhost UI on port 7860.
+If `~/.cloudflared/speech-to-speech.yml` exists, it also starts the public frontend
+on port 7861 and that protected tunnel. Shared conversation persistence is
+enabled on both frontends. Cloudflare credentials, recordings, and conversation
+files stay local. Logs are saved under `.cache/app-launcher/`. Press **Ctrl+C** to
+stop the processes launched by this command.
+
+Use `npm run start:local` to start only the backend and localhost UI, or
+`npm run start:check` to check prerequisites without starting services. Backend
+flags can override the existing model settings, for example:
+
+```bash
+npm start -- --claude_agent_max_tokens 4096
+```
+
+The launcher uses cached models by default (`HF_HUB_OFFLINE=1`). It needs the
+project Python environment, local James reference files, installed demo npm
+dependencies, and `cloudflared` when the tunnel is configured. Optional
+`S2S_PYTHON`, `S2S_CLOUDFLARED`, and `S2S_TUNNEL_CONFIG` environment variables
+override their locations.
+
 Both choices run one `RealtimeSession` adapter over the pinned official
 `@openai/agents` package's stock transport classes. The adapter keeps demo-only
 queue, audio, visualization, device, camera, and metering behavior out of the

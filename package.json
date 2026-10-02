@@ -1,0 +1,10 @@
+{
+  "name": "speech-to-speech-local-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/start-app.mjs",
+    "start:local": "node scripts/start-app.mjs --local",
+    "start:check": "node scripts/start-app.mjs --check"
+  }
+}

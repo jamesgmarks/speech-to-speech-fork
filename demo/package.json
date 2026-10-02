@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node ../scripts/start-app.mjs",
+    "start:local": "node ../scripts/start-app.mjs --local",
     "test:agents:adapter": "node --test tests/agents-adapter.test.mjs tests/playback-sdk.test.mjs tests/turn-latency.test.mjs",
     "test:agents:ws": "node --test tests/agents-websocket.test.mjs",
     "test:agents:webrtc": "node --test tests/agents-webrtc.test.mjs",
