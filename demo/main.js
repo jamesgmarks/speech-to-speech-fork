@@ -376,9 +376,11 @@ function pushToolsToSession() {
 // streaming state. The client's events are forwarded to its on* methods.
 let audioReplaying = false;
 const chat = new ChatView({
+  getAudioOutputId: () => settings.audioOutputId || "",
   onAudioPlaybackChange(playing) {
     audioReplaying = playing;
     syncMicMuteState();
+    client?.setPlaybackMuted(playing);
   },
 });
 
@@ -1521,6 +1523,7 @@ async function doStart(audioContext = null) {
       });
   client = c;
   c.setMuted(micMuted || audioReplaying);
+  c.setPlaybackMuted(audioReplaying);
   c.addEventListener("voice-catalog", (event) => {
     if (client !== c) return;
     const catalog = /** @type {CustomEvent} */ (event).detail;

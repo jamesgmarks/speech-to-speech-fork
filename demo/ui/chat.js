@@ -26,7 +26,7 @@ const CONVERSATION_STORAGE_KEY = "s2s.conversation";
 
 export class ChatView {
   /**
-   * @param {{ onAudioPlaybackChange?: (playing: boolean) => void, onUserAudioPlaybackChange?: (playing: boolean) => void }} [options]
+   * @param {{ getAudioOutputId?: () => string, onAudioPlaybackChange?: (playing: boolean) => void, onUserAudioPlaybackChange?: (playing: boolean) => void }} [options]
    */
   constructor(options = {}) {
     /** @type {HTMLButtonElement} */
@@ -55,6 +55,7 @@ export class ChatView {
     /** @type {HTMLAudioElement | null} */
     this._activeAudio = null;
     this._onAudioPlaybackChange = options.onAudioPlaybackChange ?? options.onUserAudioPlaybackChange ?? (() => {});
+    this._getAudioOutputId = options.getAudioOutputId ?? (() => "");
     /** @type {HTMLElement | null} */
     this._activeUserBubble = null;
     this._activeUserItemId = "";
@@ -473,6 +474,9 @@ export class ChatView {
   _bindReplayAudio(audio) {
     audio.addEventListener("play", () => {
       this._activateAudio(audio);
+      if (typeof audio.setSinkId === "function") {
+        void audio.setSinkId(this._getAudioOutputId()).catch(error => console.warn("Replay speaker selection failed", error));
+      }
     });
     const stopped = () => {
       if (this._activeAudio !== audio) return;

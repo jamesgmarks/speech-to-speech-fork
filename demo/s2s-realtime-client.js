@@ -126,6 +126,8 @@ export class S2sRealtimeClient extends EventTarget {
     this._playbackClearId = 0;
     this._micAnalyser = null;
     this._outAnalyser = null;
+    this._outputGain = null;
+    this._playbackMuted = false;
     this._remoteSrc = null;
     this._audioElement = null;
     this._visualiser = null;
@@ -324,6 +326,8 @@ export class S2sRealtimeClient extends EventTarget {
   async _setupAudio() {
     const ctx = this.options.audioContext ?? new AudioContext({ latencyHint: "interactive" });
     this._ctx = ctx;
+    this._outputGain = ctx.createGain();
+    this._outputGain.gain.value = this._playbackMuted ? 0 : 1;
     if (ctx.state === "suspended") await ctx.resume().catch(() => {});
     const micSrc = ctx.createMediaStreamSource(this.options.micStream);
     this._micSrc = micSrc;
@@ -393,7 +397,8 @@ export class S2sRealtimeClient extends EventTarget {
       const output = ctx.createAnalyser();
       output.fftSize = VIS_FFT_SIZE;
       output.smoothingTimeConstant = 0.3;
-      playback.connect(output);
+      playback.connect(this._outputGain);
+      this._outputGain.connect(output);
       output.connect(ctx.destination);
       this._playbackNode = playback;
       this._outAnalyser = output;
@@ -415,7 +420,8 @@ export class S2sRealtimeClient extends EventTarget {
     const output = this._ctx.createAnalyser();
     output.fftSize = VIS_FFT_SIZE;
     output.smoothingTimeConstant = 0.3;
-    source.connect(output);
+    source.connect(this._outputGain);
+    this._outputGain.connect(output);
     output.connect(this._ctx.destination);
     this._remoteSrc = source;
     this._outAnalyser = output;
@@ -853,6 +859,13 @@ export class S2sRealtimeClient extends EventTarget {
     if (this.options.transport === "webrtc") this._session?.mute(muted);
   }
 
+  /** Silence live speech during replay without cancelling agent work.
+   * @param {boolean} muted */
+  setPlaybackMuted(muted) {
+    this._playbackMuted = muted;
+    if (this._outputGain) this._outputGain.gain.value = muted ? 0 : 1;
+  }
+
   /** @param {NoiseGate} gate */
   setNoiseGate(gate) {
     this._noiseGate = gate;
@@ -1021,7 +1034,7 @@ export class S2sRealtimeClient extends EventTarget {
     this._session?.close();
     this._session = null;
     this._transport = null;
-    for (const node of [this._captureNode, this._playbackNode, this._micSrc, this._micAnalyser, this._remoteSrc, this._outAnalyser]) {
+    for (const node of [this._captureNode, this._playbackNode, this._micSrc, this._micAnalyser, this._remoteSrc, this._outAnalyser, this._outputGain]) {
       try { node?.disconnect(); } catch { /* ignored */ }
     }
     try { await this._ctx?.close(); } catch { /* ignored */ }

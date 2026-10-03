@@ -99,6 +99,23 @@ test("SDK preserves the server replay URL on the matching completed response", a
   assert.equal(finished[1].audioUrl, undefined);
 });
 
+test("replay silences the live output without cancelling the SDK response", async t => {
+  const f = await fixture(0);
+  t.after(() => f.client.close());
+  f.client._outputGain = { gain: { value: 1 }, disconnect() {} };
+  f.start();
+  f.audio(24000);
+  const messagesBefore = f.sent.length;
+  f.client.setPlaybackMuted(true);
+  assert.equal(f.client._outputGain.gain.value, 0);
+  assert.equal(f.sent.length, messagesBefore);
+  f.output.render(4800);
+  f.client.setPlaybackMuted(false);
+  assert.equal(f.client._outputGain.gain.value, 1);
+  assert.equal(f.sent.length, messagesBefore);
+  assert.equal(f.client._playbackResponseId, "a");
+});
+
 for (const sampleRate of [48000, 44100, 16000]) {
   test(`SDK truncates a completed response tail at rendered time (${sampleRate} Hz)`, async (t) => {
     const f = await fixture(1200, sampleRate);
