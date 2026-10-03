@@ -488,6 +488,7 @@ class AudioHandler(RealtimeBaseHandler):
             conn_id,
             response_key,
         )
+        self._service.record_output_audio(conn_id, assistant_item_id, audio)
         rp = st.current_response_params
         client_out_rate = None
         if rp and rp.audio and rp.audio.output and rp.audio.output.format:

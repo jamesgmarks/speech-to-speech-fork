@@ -302,6 +302,7 @@ class WebRTCSession(SessionTransport):
         )
         if events:
             await self.send_events(events)
+        service.record_output_audio(session_id, _item_id, pcm)
         self._track.write(self._out_resampler.resample_pcm(pcm, PIPELINE_SAMPLE_RATE))
 
     def discard_pending_audio(self) -> None:

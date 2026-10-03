@@ -1956,6 +1956,30 @@ body:not(.chat-panel-collapsed) .bubble-stack {
 .hist-msg.assistant { align-self: flex-end; }
 .hist-msg.tool { align-self: flex-start; max-width: 100%; }
 
+.hist-message-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hist-replay {
+  color: var(--text-muted, #a8a8b3);
+  background: transparent;
+  border: 1px solid var(--border, #30303b);
+  border-radius: 6px;
+  padding: 4px 8px;
+  min-height: 30px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.hist-replay:hover, .hist-replay[aria-pressed="true"] {
+  color: var(--text, #eeeeef);
+  background: var(--surface, #24242f);
+}
+.hist-replay:focus-visible {
+  outline: 2px solid #9680ff;
+  outline-offset: 2px;
+}
 .hist-role {
   font-family: var(--font-mono);
   font-size: 10px;

@@ -374,10 +374,10 @@ function pushToolsToSession() {
 // ── Chat view ───────────────────────────────────────────────────────────────
 // Owns the history panel, the ephemeral bubbles, and all transcript/tool
 // streaming state. The client's events are forwarded to its on* methods.
-let userAudioReplaying = false;
+let audioReplaying = false;
 const chat = new ChatView({
-  onUserAudioPlaybackChange(playing) {
-    userAudioReplaying = playing;
+  onAudioPlaybackChange(playing) {
+    audioReplaying = playing;
     syncMicMuteState();
   },
 });
@@ -409,7 +409,7 @@ let micMuted = false;
 
 /** Apply both the user's mute choice and the temporary replay guard. */
 function syncMicMuteState() {
-  const muted = micMuted || userAudioReplaying;
+  const muted = micMuted || audioReplaying;
   for (const track of micStream?.getAudioTracks() ?? []) {
     track.enabled = !muted;
   }
@@ -1520,7 +1520,7 @@ async function doStart(audioContext = null) {
         ...common,
       });
   client = c;
-  c.setMuted(micMuted || userAudioReplaying);
+  c.setMuted(micMuted || audioReplaying);
   c.addEventListener("voice-catalog", (event) => {
     if (client !== c) return;
     const catalog = /** @type {CustomEvent} */ (event).detail;
@@ -1588,7 +1588,7 @@ async function doStart(audioContext = null) {
   c.addEventListener("agent-permission-error", e => agentPermissions.error(e.detail));
 
   c.addEventListener("response-finished", (e) => {
-    const detail = /** @type {CustomEvent<{ responseId: string; status: string; audible?: boolean; transcript?: string; latency?: import("./turn-latency.js").TurnLatency | null }>} */ (e).detail;
+    const detail = /** @type {CustomEvent<{ responseId: string; status: string; audible?: boolean; transcript?: string; audioUrl?: string; latency?: import("./turn-latency.js").TurnLatency | null }>} */ (e).detail;
     chat.onResponseFinished(detail);
     agentPermissions.finish(detail.responseId);
   });

@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Mapping
+from hashlib import sha256
 from queue import Queue
 from threading import Event as ThreadingEvent
 from typing import Any, Callable, Literal, Optional, TypeVar, Union, cast
@@ -270,6 +271,9 @@ class ConnState(BaseModel):
     current_output_index: int | None = None
     current_output_kind: Literal["text", "tool_call"] | None = None
     audio_output_started: bool = False
+    replay_audio: dict[str, bytearray] = Field(default_factory=dict)
+    replay_audio_bytes: int = 0
+    replay_audio_overflow: bool = False
     output_audio_resampler: Any = None
     output_audio_resampler_key: tuple[str, str, int] | None = None
     # Each entry contains one message's identity, text parts, and lifecycle
@@ -557,6 +561,47 @@ class RealtimeService:
         response_key: str | None = None,
     ) -> list[ServerEvent]:
         return self.audio.encode_audio_chunk(conn_id, audio, response_key)
+
+    def record_output_audio(self, conn_id: str, item_id: str, pcm: bytes) -> None:
+        st = self._state(conn_id)
+        if self.conversation_store is None or not st.conversation_key or st.replay_audio_overflow:
+            return
+        # Bound temporary memory to five minutes per response. Do not publish
+        # a misleading partial recording if a response exceeds this limit.
+        st.replay_audio_bytes += len(pcm)
+        if st.replay_audio_bytes > PIPELINE_SAMPLE_RATE * 2 * 300:
+            st.replay_audio.clear()
+            st.replay_audio_overflow = True
+            return
+        st.replay_audio.setdefault(item_id, bytearray()).extend(pcm)
+
+    def publish_response_audio(self, conn_id: str, response_id: str, status: str) -> str | None:
+        st = self._state(conn_id)
+        store = self.conversation_store
+        if store is None or not st.conversation_key or not st.replay_audio:
+            return None
+        clips = {sha256(item_id.encode()).hexdigest(): bytes(pcm) for item_id, pcm in st.replay_audio.items() if pcm}
+        if not clips:
+            return None
+        # The live bubble combines the response; restored history retains the
+        # separate assistant messages around native tool calls.
+        response_audio = next(iter(clips))
+        if len(clips) > 1:
+            response_audio = sha256(response_id.encode()).hexdigest()
+            clips[response_audio] = b"".join(clips.values())
+        ids = st.runtime_config.chat.provisional_assistant_ids(st.current_response_key)
+        item_audio = {}
+        if status == "completed" and len(ids) == len(st.pending_text_outputs):
+            for message_id, pending in zip(ids, st.pending_text_outputs):
+                audio_id = sha256(str(pending["item_id"]).encode()).hexdigest()
+                if audio_id in clips:
+                    item_audio[message_id] = audio_id
+        try:
+            store.save_audio(st.conversation_key, self.llm_backend, clips, item_audio, PIPELINE_SAMPLE_RATE)
+        except (OSError, ValueError):
+            logger.exception("Could not save assistant replay audio")
+            return None
+        return store.audio_url(st.conversation_key, response_audio)
 
     def finish_audio_output(
         self,

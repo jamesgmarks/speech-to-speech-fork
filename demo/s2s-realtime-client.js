@@ -754,6 +754,7 @@ export class S2sRealtimeClient extends EventTarget {
           audible: this._audibleResponses.has(responseId),
           latency: readTurnLatency(event.response),
           transcript,
+          audioUrl: event.response?.speech_to_speech_audio_url,
         } }));
         this._audibleResponses.delete(responseId);
         this._asstTranscriptByResp.delete(responseId);

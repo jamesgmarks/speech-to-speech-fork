@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
 from openai.types.realtime import (
     ConversationItemCreateEvent,
     ConversationItemTruncateEvent,
@@ -599,6 +600,16 @@ def create_app(
                     pass
 
     app = FastAPI(lifespan=lifespan)
+
+    @app.get("/v1/conversation/audio/{key}/{audio_id}.wav")
+    async def conversation_audio(key: str, audio_id: str) -> FileResponse:
+        if store is None:
+            raise HTTPException(status_code=404, detail="Recording unavailable.")
+        try:
+            path = store.audio_path(key, audio_id)
+        except (ValueError, FileNotFoundError):
+            raise HTTPException(status_code=404, detail="Recording unavailable.") from None
+        return FileResponse(path, media_type="audio/wav", headers={"Cache-Control": "private, no-store"})
 
     @app.get("/v1/conversation")
     async def current_conversation() -> dict[str, Any]:

@@ -101,6 +101,9 @@ class ResponseHandler(RealtimeBaseHandler):
 
     def _end_response(self, conn_id: str, status: _ResponseStatus = "completed") -> None:
         st = self._state(conn_id)
+        st.replay_audio.clear()
+        st.replay_audio_bytes = 0
+        st.replay_audio_overflow = False
         completed_response_key = st.current_response_key
         self._service.finish_background_delivery(conn_id, completed_response_key, status)
         if status == "cancelled":
@@ -963,6 +966,9 @@ class ResponseHandler(RealtimeBaseHandler):
             for pending in st.pending_text_outputs:
                 events.extend(self._finish_message_output(conn_id, pending, item_status, wants_audio, response_key))
             terminal_response = self._build_response(conn_id, status, reason)
+            audio_url = self._service.publish_response_audio(conn_id, resp_id, status)
+            if audio_url:
+                terminal_response = terminal_response.model_copy(update={"speech_to_speech_audio_url": audio_url})
             function_outputs = {
                 getattr(item, "call_id", None): item
                 for item in (terminal_response.output or [])

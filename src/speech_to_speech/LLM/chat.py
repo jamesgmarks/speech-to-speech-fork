@@ -512,6 +512,17 @@ class Chat:
                 tracked_item_ids.difference_update(committed_item_ids)
             return recorded_items
 
+    def provisional_assistant_ids(self, response_key: str | None) -> list[str]:
+        """Return one response's assistant message IDs in emission order."""
+        if response_key is None:
+            return []
+        with self._lock:
+            item_ids, _ = self._provisional_generations.get(response_key, (set(), set()))
+            return [
+                item.id for item in self.buffer
+                if isinstance(item, RealtimeConversationItemAssistantMessage) and item.id is not None and item.id in item_ids
+            ]
+
     def finalize_provisional_generation(self, response_key: str | None) -> None:
         """Make delivered response history permanent."""
 

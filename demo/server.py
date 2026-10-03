@@ -45,6 +45,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from uuid import UUID
@@ -263,6 +264,34 @@ async def _conversation_proxy(method: str, expected_key: str | None = None):
 @app.get("/api/conversation")
 async def current_conversation():
     return await _conversation_proxy("GET")
+
+
+@app.get("/api/conversation/audio/{key}/{audio_id}.wav")
+async def conversation_audio(request: Request, key: str, audio_id: str):
+    """Proxy recordings through this origin (including its Access protection)."""
+    try:
+        if str(UUID(key)) != key or not re.fullmatch(r"[a-f0-9]{64}", audio_id):
+            raise ValueError("Invalid recording")
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Recording unavailable.") from None
+    if not SPEECH_TO_SPEECH_URL:
+        raise HTTPException(status_code=404, detail="Recording unavailable.")
+    parts = urlsplit(_webrtc_calls_url(SPEECH_TO_SPEECH_URL))
+    path = parts.path.removesuffix("/realtime/calls") + f"/conversation/audio/{key}/{audio_id}.wav"
+    url = urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+    headers = {"Range": request.headers["range"]} if "range" in request.headers else {}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            response = await http.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Recording unavailable. Try again shortly.") from exc
+    if response.status_code not in (200, 206, 416):
+        raise HTTPException(status_code=response.status_code, detail="Recording unavailable.")
+    returned_headers = {"Cache-Control": "private, no-store"}
+    for name in ("content-range", "accept-ranges"):
+        if name in response.headers:
+            returned_headers[name] = response.headers[name]
+    return Response(response.content, status_code=response.status_code, media_type="audio/wav", headers=returned_headers)
 
 
 @app.post("/api/conversation/new")

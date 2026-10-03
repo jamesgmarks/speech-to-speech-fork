@@ -171,6 +171,15 @@ startup. On first use the server adopts its most recently saved conversation.
 The durable `current.json` pointer stays fixed across reconnects and service or
 machine restarts. **Settings → Start a new conversation** rotates it deliberately
 for all browsers; changing the backing LLM clears its context and transcript.
+Assistant messages generated with conversation persistence enabled include a
+**Replay** button. It plays the original generated speech, keeping the voice
+used for that reply even after settings change. Recordings remain on the speech
+server alongside the saved conversation and work after reloads and from either
+frontend address. The microphone is temporarily muted during replay, and only
+one user or assistant recording plays at a time. Earlier replies without saved
+audio have no replay button. Responses exceeding five minutes are not archived.
+The same-origin recording proxy preserves Cloudflare Access protection.
+
 Only one browser can attach its microphone to a conversation at a time. Idle
 pages refresh the shared transcript without occupying a speech slot. This mode
 is opt-in because all visitors to that deployment share the same conversation;

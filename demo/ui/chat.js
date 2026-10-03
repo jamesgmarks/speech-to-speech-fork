@@ -26,7 +26,7 @@ const CONVERSATION_STORAGE_KEY = "s2s.conversation";
 
 export class ChatView {
   /**
-   * @param {{ onUserAudioPlaybackChange?: (playing: boolean) => void }} [options]
+   * @param {{ onAudioPlaybackChange?: (playing: boolean) => void, onUserAudioPlaybackChange?: (playing: boolean) => void }} [options]
    */
   constructor(options = {}) {
     /** @type {HTMLButtonElement} */
@@ -53,8 +53,8 @@ export class ChatView {
     /** @type {Set<string>} */
     this._audioUrls = new Set();
     /** @type {HTMLAudioElement | null} */
-    this._activeUserAudio = null;
-    this._onUserAudioPlaybackChange = options.onUserAudioPlaybackChange ?? (() => {});
+    this._activeAudio = null;
+    this._onAudioPlaybackChange = options.onAudioPlaybackChange ?? options.onUserAudioPlaybackChange ?? (() => {});
     /** @type {HTMLElement | null} */
     this._activeUserBubble = null;
     this._activeUserItemId = "";
@@ -100,7 +100,8 @@ export class ChatView {
         this.conversationBackend = typeof saved.backend === "string" ? saved.backend : "";
         for (const row of Array.isArray(saved.messages) ? saved.messages : []) {
           if (["user", "assistant"].includes(row.role) && typeof row.text === "string") {
-            this._appendHistMsg(row.role, row.text, false);
+            const hist = this._appendHistMsg(row.role, row.text, false);
+            if (row.role === "assistant") this._attachAssistantAudio(hist, row.audio_url);
           }
         }
       }
@@ -117,12 +118,17 @@ export class ChatView {
   }
 
   _persistConversation() {
-    const messages = Array.from(this._chatHistory.querySelectorAll(".hist-msg.user, .hist-msg.assistant"))
-      .map(el => ({ role: el.classList.contains("user") ? "user" : "assistant", text: el.querySelector(".hist-body")?.textContent || "" }))
-      .filter(row => row.text);
+    const messages = this._historyMessages();
     try {
       localStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify({ key: this.conversationKey, backend: this.conversationBackend, messages }));
     } catch (error) { console.warn("Could not save conversation display", error); }
+  }
+
+  _historyMessages() {
+    return Array.from(this._chatHistory.querySelectorAll(".hist-msg.user, .hist-msg.assistant"))
+      .map(el => ({ role: el.classList.contains("user") ? "user" : "assistant", text: el.querySelector(".hist-body")?.textContent || "",
+        ...(el instanceof HTMLElement && el.dataset.audioUrl ? { audio_url: el.dataset.audioUrl } : {}) }))
+      .filter(row => row.text);
   }
 
   /** Deliberate reset; transport stop/start never calls this. */
@@ -137,15 +143,13 @@ export class ChatView {
     this._persistConversation();
   }
 
-  /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string}>}} info */
+  /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string, audio_url?: string}>}} info */
   adoptSharedConversation(info) {
     if (!info || typeof info.key !== "string" || !/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(info.key)
         || typeof info.backend !== "string" || !Array.isArray(info.history)) {
       throw new Error("The speech service returned an invalid conversation.");
     }
-    const shown = Array.from(this._chatHistory.querySelectorAll(".hist-msg.user, .hist-msg.assistant"))
-      .map(el => ({ role: el.classList.contains("user") ? "user" : "assistant", text: el.querySelector(".hist-body")?.textContent || "" }))
-      .filter(row => row.text);
+    const shown = this._historyMessages();
     if (info.key === this.conversationKey && info.backend === this.conversationBackend && !info.reset
         && JSON.stringify(shown) === JSON.stringify(info.history)) return;
     this.reset({ dismiss: true });
@@ -158,7 +162,7 @@ export class ChatView {
     this.onConversationRestored(info);
   }
 
-  /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string}>}} info */
+  /** @param {{key: string, backend: string, reset: boolean, history?: Array<{role: "user"|"assistant", text: string, audio_url?: string}>}} info */
   onConversationRestored(info) {
     if (info.key !== this.conversationKey || typeof info.backend !== "string") return;
     if (info.reset || (this.conversationBackend && this.conversationBackend !== info.backend)) {
@@ -167,7 +171,10 @@ export class ChatView {
     }
     if (!this._chatHistory.querySelector(".hist-msg")) {
       for (const row of info.history || []) {
-        if (["user", "assistant"].includes(row.role) && typeof row.text === "string") this._appendHistMsg(row.role, row.text, false);
+        if (["user", "assistant"].includes(row.role) && typeof row.text === "string") {
+          const hist = this._appendHistMsg(row.role, row.text, false);
+          if (row.role === "assistant") this._attachAssistantAudio(hist, row.audio_url);
+        }
       }
     }
     this.conversationBackend = info.backend;
@@ -402,7 +409,7 @@ export class ChatView {
 
   /** Reset the panel to the empty state and clear the unread badge. */
   clear() {
-    this._stopUserAudioPlayback();
+    this._stopAudioPlayback();
     for (const url of this._audioUrls) URL.revokeObjectURL(url);
     this._audioUrls.clear();
     this._userAudioByItem.clear();
@@ -442,11 +449,88 @@ export class ChatView {
     return hist;
   }
 
-  _stopUserAudioPlayback() {
-    const active = this._activeUserAudio;
-    this._activeUserAudio = null;
+  _stopAudioPlayback() {
+    const active = this._activeAudio;
+    this._activeAudio = null;
     if (active && !active.paused) active.pause();
-    this._onUserAudioPlaybackChange(false);
+    active?.dispatchEvent(new Event("replay-state-change"));
+    this._onAudioPlaybackChange(false);
+  }
+
+  /** @param {HTMLAudioElement} audio */
+  _activateAudio(audio) {
+    const previous = this._activeAudio;
+    this._activeAudio = audio;
+    if (previous && previous !== audio) {
+      previous.pause();
+      previous.dispatchEvent(new Event("replay-state-change"));
+    }
+    this._onAudioPlaybackChange(true);
+    audio.dispatchEvent(new Event("replay-state-change"));
+  }
+
+  /** @param {HTMLAudioElement} audio */
+  _bindReplayAudio(audio) {
+    audio.addEventListener("play", () => {
+      this._activateAudio(audio);
+    });
+    const stopped = () => {
+      if (this._activeAudio !== audio) return;
+      this._activeAudio = null;
+      this._onAudioPlaybackChange(false);
+    };
+    audio.addEventListener("pause", stopped);
+    audio.addEventListener("ended", stopped);
+    audio.addEventListener("error", stopped);
+  }
+
+  /** @param {HTMLElement} hist @param {unknown} url */
+  _attachAssistantAudio(hist, url) {
+    // Recordings are served through this origin, never an arbitrary URL from
+    // a transcript or browser storage. Audio remains private behind Access.
+    if (typeof url !== "string" || !/^\/v1\/conversation\/audio\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/[a-f0-9]{64}\.wav$/.test(url)) return;
+    if (hist.dataset.audioUrl === url) return;
+    hist.dataset.audioUrl = url;
+    const audio = document.createElement("audio");
+    audio.hidden = true;
+    audio.preload = "none";
+    audio.src = url.replace(/^\/v1\//, "/api/");
+    this._bindReplayAudio(audio);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "hist-replay";
+    let playbackError = false;
+    const update = () => {
+      const playing = this._activeAudio === audio;
+      button.textContent = playing ? "■ Stop" : "▶ Replay";
+      button.setAttribute("aria-label", playing ? "Stop replaying assistant audio" : "Replay assistant audio");
+      button.setAttribute("aria-pressed", String(playing));
+      button.title = playbackError ? "Audio could not be played. Click to try again."
+        : playing ? "Stop replay" : "Replay the original spoken response";
+    };
+    button.addEventListener("click", async () => {
+      if (this._activeAudio === audio) { this._stopAudioPlayback(); update(); return; }
+      playbackError = false;
+      // Mute before play(), including while the recording is downloading.
+      this._activateAudio(audio);
+      audio.currentTime = 0;
+      try { await audio.play(); }
+      catch {
+        if (this._activeAudio === audio) this._stopAudioPlayback();
+        playbackError = true;
+        update();
+      }
+    });
+    for (const event of ["play", "pause", "ended", "error", "replay-state-change"]) audio.addEventListener(event, update);
+    audio.addEventListener("error", () => { playbackError = true; update(); });
+    update();
+    const header = document.createElement("div");
+    header.className = "hist-message-header";
+    const label = hist.querySelector(".hist-role");
+    if (label) header.appendChild(label);
+    header.appendChild(button);
+    hist.prepend(header);
+    hist.appendChild(audio);
   }
 
   /**
@@ -653,7 +737,7 @@ export class ChatView {
     const audio = /** @type {HTMLAudioElement} */ (container.querySelector("audio"));
     const previous = this._userAudioByItem.get(id);
     if (previous) {
-      if (this._activeUserAudio === previous.audio) this._stopUserAudioPlayback();
+      if (this._activeAudio === previous.audio) this._stopAudioPlayback();
       URL.revokeObjectURL(previous.url);
       this._audioUrls.delete(previous.url);
     }
@@ -673,21 +757,7 @@ export class ChatView {
     }
 
     if (isNewPlayer) {
-      audio.addEventListener("play", () => {
-        if (this._activeUserAudio && this._activeUserAudio !== audio) {
-          this._activeUserAudio.pause();
-        }
-        this._activeUserAudio = audio;
-        this._onUserAudioPlaybackChange(true);
-      });
-      const stopped = () => {
-        if (this._activeUserAudio !== audio) return;
-        this._activeUserAudio = null;
-        this._onUserAudioPlaybackChange(false);
-      };
-      audio.addEventListener("pause", stopped);
-      audio.addEventListener("ended", stopped);
-      audio.addEventListener("error", stopped);
+      this._bindReplayAudio(audio);
     }
     this._scrollToBottom();
     this._markUnread();
@@ -695,7 +765,7 @@ export class ChatView {
 
   /**
    * A response closed (completed or cancelled).
-   * @param {{ responseId: string; status: string; audible?: boolean; transcript?: string; latency?: import("../turn-latency.js").TurnLatency | null }} detail
+   * @param {{ responseId: string; status: string; audible?: boolean; transcript?: string; audioUrl?: string; latency?: import("../turn-latency.js").TurnLatency | null }} detail
    */
   onResponseFinished(detail) {
     const { responseId, status, audible, transcript } = detail;
@@ -706,6 +776,10 @@ export class ChatView {
     if (!responseId) return;
     const entry = this._asstByResp.get(responseId);
     let hist = entry?.hist ?? null;
+    if (detail.audioUrl) {
+      hist ??= this._appendHistMsg("assistant", transcript || "", false);
+      this._attachAssistantAudio(hist, detail.audioUrl);
+    }
     if (detail.latency) {
       hist ??= this._appendHistMsg("assistant", transcript || "", false);
       this._appendTimings(hist, detail.latency);

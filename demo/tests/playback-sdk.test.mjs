@@ -83,6 +83,22 @@ for (const manual of [false, true]) {
   }
 }
 
+test("SDK preserves the server replay URL on the matching completed response", async t => {
+  const f = await fixture();
+  t.after(() => f.client.close());
+  const finished = [];
+  f.client.addEventListener("response-finished", event => finished.push(event.detail));
+  const url = "/v1/conversation/audio/88edaf87-91f2-4fc3-a153-7b5355fdd7d5/" + "a".repeat(64) + ".wav";
+  f.start("replay");
+  f.audio(2400, "replay");
+  f.receive({ type: "response.done", response: { id: "replay", status: "completed", output: [], speech_to_speech_audio_url: url } });
+  f.start("silent");
+  f.done("silent");
+  assert.equal(finished[0].responseId, "replay");
+  assert.equal(finished[0].audioUrl, url);
+  assert.equal(finished[1].audioUrl, undefined);
+});
+
 for (const sampleRate of [48000, 44100, 16000]) {
   test(`SDK truncates a completed response tail at rendered time (${sampleRate} Hz)`, async (t) => {
     const f = await fixture(1200, sampleRate);

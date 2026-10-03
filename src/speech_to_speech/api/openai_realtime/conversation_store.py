@@ -2,7 +2,9 @@
 
 import json
 import os
+import re
 import tempfile
+import wave
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -59,6 +61,57 @@ class ConversationStore:
         with self._lock:
             self._active.discard(key)
             self._saved.pop(key, None)
+
+    @staticmethod
+    def audio_url(key: str, audio_id: str) -> str:
+        return f"/v1/conversation/audio/{key}/{audio_id}.wav"
+
+    def save_audio(
+        self, key: str, backend: str, clips: dict[str, bytes], item_audio: dict[str, str], sample_rate: int
+    ) -> None:
+        """Publish original generated speech atomically, separately from model context."""
+        self.validate_key(key)
+        with self._lock:
+            path = self.directory / f"{key}.json"
+            saved = json.loads(path.read_text())
+            if saved.get("backend") != backend:
+                return
+            directory = self.directory / "audio" / key
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            for audio_id, pcm in clips.items():
+                if not re.fullmatch(r"[a-f0-9]{64}", audio_id):
+                    raise ValueError("Invalid audio ID")
+                fd, temporary = tempfile.mkstemp(prefix=".audio-", dir=directory)
+                try:
+                    with os.fdopen(fd, "wb") as stream:
+                        with wave.open(stream, "wb") as output:
+                            output.setnchannels(1)
+                            output.setsampwidth(2)
+                            output.setframerate(sample_rate)
+                            output.writeframes(pcm)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(temporary, directory / f"{audio_id}.wav")
+                finally:
+                    if os.path.exists(temporary):
+                        os.unlink(temporary)
+            saved["audio_files"] = list(dict.fromkeys([*saved.get("audio_files", []), *clips]))
+            saved.setdefault("item_audio", {}).update(item_audio)
+            self._write_json_locked(f"{key}.json", saved)
+            self._saved.pop(key, None)
+
+    def audio_path(self, key: str, audio_id: str) -> Path:
+        self.validate_key(key)
+        if not re.fullmatch(r"[a-f0-9]{64}", audio_id):
+            raise ValueError("Invalid audio ID")
+        with self._lock:
+            manifest = self.directory / f"{key}.json"
+            if not manifest.is_file() or audio_id not in json.loads(manifest.read_text()).get("audio_files", []):
+                raise FileNotFoundError("Recording unavailable")
+            path = self.directory / "audio" / key / f"{audio_id}.wav"
+            if not path.is_file():
+                raise FileNotFoundError("Recording unavailable")
+            return path
 
     def current(self, backend: str, size: int) -> dict[str, Any]:
         """Return the deployment's durable conversation without claiming a slot.
@@ -118,7 +171,13 @@ class ConversationStore:
         chat = Chat.from_persistent_snapshot(items, size)
         self._save_locked(key, backend, chat.persistent_snapshot())
         persisted = json.loads(path.read_text())
-        history = [{"role": row["role"], "text": row["text"]} for row in persisted.get("display_history", [])]
+        history = []
+        for row in persisted.get("display_history", []):
+            message = {"role": row["role"], "text": row["text"]}
+            audio_id = persisted.get("item_audio", {}).get(row["id"])
+            if audio_id:
+                message["audio_url"] = self.audio_url(key, audio_id)
+            history.append(message)
         return {"key": key, "backend": backend, "resumed": bool(items), "reset": reset, "history": history}
 
     def _save_locked(self, key: str, backend: str, items: list[dict[str, Any]]) -> None:
@@ -145,6 +204,10 @@ class ConversationStore:
                     by_id[row["id"]] = row
         value = json.loads(content)
         value["display_history"] = history
+        if previous.get("backend") == backend:
+            for field in ("audio_files", "item_audio"):
+                if field in previous:
+                    value[field] = previous[field]
         self._write_json_locked(f"{key}.json", value)
         self._saved[key] = content
 

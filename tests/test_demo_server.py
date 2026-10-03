@@ -687,3 +687,36 @@ async def test_shared_conversation_proxy_is_private_and_validates_explicit_reset
     with pytest.raises(demo_server.HTTPException) as exc:
         await demo_server.current_conversation()
     assert exc.value.status_code == 409
+
+
+async def test_assistant_audio_proxy_pins_private_backend_and_preserves_range(monkeypatch):
+    key = "88edaf87-91f2-4fc3-a153-7b5355fdd7d5"
+    audio_id = "a" * 64
+    calls = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, headers):
+            calls.append((url, headers))
+            return httpx.Response(206, content=b"RIFF", headers={"content-range": "bytes 0-3/100", "accept-ranges": "bytes"})
+
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", Client)
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "ws://127.0.0.1:8765/v1/realtime")
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_PUBLIC_URL", "wss://voice.example.com/v1/realtime")
+    request = Request({"type": "http", "headers": [(b"range", b"bytes=0-3")], "query_string": b"url=http://untrusted"})
+    response = await demo_server.conversation_audio(request, key, audio_id)
+    assert response.status_code == 206 and response.body == b"RIFF"
+    assert response.headers["content-range"] == "bytes 0-3/100"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert calls == [(f"http://127.0.0.1:8765/v1/conversation/audio/{key}/{audio_id}.wav", {"Range": "bytes=0-3"})]
+    with pytest.raises(demo_server.HTTPException) as exc:
+        await demo_server.conversation_audio(request, key, "../../escape")
+    assert exc.value.status_code == 404
