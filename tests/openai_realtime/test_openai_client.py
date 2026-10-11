@@ -113,6 +113,9 @@ class _ServerEnv:
         self.app = create_app(
             pool=[self.unit], stop_event=self.stop_event, allowed_origins=frozenset({f"http://127.0.0.1:{self.port}"})
         )
+        # These tests exercise the client protocol, including client-supplied instructions; the shared-instructions
+        # override is covered in test_shared_settings.py.
+        self.unit.service.shared_instructions = None
         self._server_thread: threading.Thread | None = None
 
     def start(self):

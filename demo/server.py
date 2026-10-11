@@ -320,6 +320,43 @@ async def voices():
         raise HTTPException(status_code=502, detail="Voice choices unavailable. Try refreshing when the speech service is ready.") from exc
 
 
+def _settings_url(suffix: str = "") -> str:
+    parts = urlsplit(_webrtc_calls_url(SPEECH_TO_SPEECH_URL))
+    path = parts.path.removesuffix("/realtime/calls") + "/settings" + suffix
+    return urlunsplit((parts.scheme, parts.netloc, path, parts.query, ""))
+
+
+async def _settings_proxy(method: str, suffix: str = "", **kwargs) -> Response:
+    """Shared backend settings, relayed from the deployment-pinned backend only."""
+    if not SPEECH_TO_SPEECH_URL:
+        raise HTTPException(status_code=404, detail="Shared settings are unavailable.")
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as http:
+            response = await http.request(method, _settings_url(suffix), **kwargs)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Shared settings are unavailable. Try again shortly.") from exc
+    return Response(response.content, status_code=response.status_code, media_type="application/json")
+
+
+@app.get("/api/settings")
+async def shared_settings():
+    return await _settings_proxy("GET")
+
+
+@app.put("/api/settings/agent-instructions")
+async def save_agent_instructions(request: Request):
+    origin = request.headers.get("origin")
+    if origin and (urlsplit(origin).scheme, urlsplit(origin).netloc) != (request.url.scheme, request.url.netloc):
+        raise HTTPException(status_code=403, detail="Saving settings requires a same-origin request.")
+    headers = {"If-Match": request.headers["if-match"]} if "if-match" in request.headers else {}
+    return await _settings_proxy(
+        "PUT",
+        "/agent-instructions",
+        content=await request.body(),
+        headers={"Content-Type": "application/json", **headers},
+    )
+
+
 @app.get("/api/agent-sessions")
 async def agent_sessions():
     """Read inventory only from the deployment-pinned speech backend."""

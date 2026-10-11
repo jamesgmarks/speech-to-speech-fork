@@ -720,3 +720,50 @@ async def test_assistant_audio_proxy_pins_private_backend_and_preserves_range(mo
     with pytest.raises(demo_server.HTTPException) as exc:
         await demo_server.conversation_audio(request, key, "../../escape")
     assert exc.value.status_code == 404
+
+
+async def test_shared_settings_proxy_relays_get_and_if_match_put(monkeypatch):
+    calls = []
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def request(self, method, url, **kwargs):
+            calls.append((method, url, kwargs.get("headers"), kwargs.get("content")))
+            return httpx.Response(200, json={"etag": '"x"'}, request=httpx.Request(method, url))
+
+    monkeypatch.setattr(demo_server, "SPEECH_TO_SPEECH_URL", "wss://speech.example/prefix/v1/realtime?token=local")
+    monkeypatch.setattr(demo_server.httpx, "AsyncClient", FakeAsyncClient)
+    assert (await demo_server.shared_settings()).status_code == 200
+    request = Request(
+        {
+            "type": "http",
+            "method": "PUT",
+            "scheme": "https",
+            "server": ("demo.example", 443),
+            "path": "/api/settings/agent-instructions",
+            "query_string": b"",
+            "headers": [(b"if-match", b'"x"'), (b"origin", b"https://demo.example")],
+        },
+        receive=lambda: None,
+    )
+
+    async def body():
+        return b'{"agent_instructions": "hi"}'
+
+    request.body = body
+    assert (await demo_server.save_agent_instructions(request)).status_code == 200
+    assert calls[0][:2] == ("GET", "https://speech.example/prefix/v1/settings?token=local")
+    assert calls[1][1] == "https://speech.example/prefix/v1/settings/agent-instructions?token=local"
+    assert calls[1][2]["If-Match"] == '"x"'
+    foreign = Request({**request.scope, "headers": [(b"origin", b"https://evil.example")]}, receive=lambda: None)
+    with pytest.raises(demo_server.HTTPException) as denied:
+        await demo_server.save_agent_instructions(foreign)
+    assert denied.value.status_code == 403

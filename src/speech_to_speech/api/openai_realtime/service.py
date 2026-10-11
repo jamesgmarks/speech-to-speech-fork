@@ -381,6 +381,8 @@ class RealtimeService:
         if speculative_turns is not None:
             speculative_turns.wait_observer = self.turn_latency_store.record_smart_wait
         self._default_instructions = default_instructions
+        # When set, this backend-wide value always overrides whatever a client sends.
+        self.shared_instructions: str | None = None
         self.llm_backend = llm_backend
         self.default_agent_permission_mode = default_agent_permission_mode
         self.conversation_store: ConversationStore | None = None
@@ -430,7 +432,7 @@ class RealtimeService:
                 chat=chat,
                 session=RealtimeSessionCreateRequest(
                     type="realtime",
-                    instructions=self._default_instructions,
+                    instructions=self._effective_default_instructions(),
                 ),
                 agent_permission_mode=self.default_agent_permission_mode,
             ),
@@ -523,8 +525,20 @@ class RealtimeService:
     def build_session_updated(self, conn_id: str) -> SessionUpdatedEvent:
         return self.session.build_session_updated(conn_id)
 
+    def _effective_default_instructions(self) -> str | None:
+        return self.shared_instructions if self.shared_instructions is not None else self._default_instructions
+
+    def apply_shared_instructions(self) -> list[str]:
+        """Push the shared instructions into every live session; returns their ids."""
+        for conn_id, st in self._conns.items():
+            if st.runtime_config.session is not None:
+                st.runtime_config.session.instructions = self.shared_instructions
+        return list(self._conns)
+
     def handle_session_update(self, conn_id: str, event: SessionUpdateEvent) -> Optional[RealtimeErrorEvent]:
         error = self.session.handle_session_update(conn_id, event)
+        if error is None and self.shared_instructions is not None:
+            self._state(conn_id).runtime_config.session.instructions = self.shared_instructions
         if error is None:
             # A prefetch captured the previous session configuration.
             self.response.discard_tool_followup_prefetch(conn_id)

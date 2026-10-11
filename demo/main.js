@@ -27,7 +27,6 @@ import { populateVoiceChoices } from "./ui/voice-choices.js";
 
 
 const DEFAULT_VOICE = "Aiden";
-const DEFAULT_INSTRUCTIONS = "You are a friendly voice assistant.";
 
 const STORAGE_KEYS = {
   // Direct s2s server URL, used only when the deploy has no LOAD_BALANCER_URL
@@ -111,11 +110,51 @@ const SNAPSHOT_LADDER = /** @type {[number, number][]} */ ([
   [384, 0.3],
 ]);
 
+let sharedInstructionsEtag = "";
+
+/** The agent instructions live on the backend and win over anything a client sends. */
+async function loadSharedInstructions() {
+  localStorage.removeItem(STORAGE_KEYS.instructions); // the old per-browser copy
+  try {
+    const res = await fetch("/api/settings");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const shared = await res.json();
+    settings.instructions = shared.agent_instructions;
+    sharedInstructionsEtag = shared.etag;
+    inputInstructions.value = settings.instructions;
+  } catch (err) {
+    console.warn("Shared instructions unavailable", err);
+  }
+}
+
+/** @param {string} text */
+async function saveSharedInstructions(text) {
+  try {
+    const res = await fetch("/api/settings/agent-instructions", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(sharedInstructionsEtag ? { "If-Match": sharedInstructionsEtag } : {}) },
+      body: JSON.stringify({ agent_instructions: text }),
+    });
+    const body = await res.json();
+    if (res.status === 412) {
+      // Changed elsewhere: show the current value rather than overwrite it.
+      settings.instructions = body.agent_instructions;
+      inputInstructions.value = body.agent_instructions;
+    } else if (!res.ok) {
+      throw new Error(body.detail || `HTTP ${res.status}`);
+    }
+    sharedInstructionsEtag = body.etag ?? sharedInstructionsEtag;
+  } catch (err) {
+    console.warn("Could not save shared instructions", err);
+  }
+}
+
 function loadSettings() {
   return {
     directUrl: localStorage.getItem(STORAGE_KEYS.directUrl) || "",
     voice: localStorage.getItem(STORAGE_KEYS.voice) || DEFAULT_VOICE,
-    instructions: localStorage.getItem(STORAGE_KEYS.instructions) || DEFAULT_INSTRUCTIONS,
+    // Shared on the backend; filled in by loadSharedInstructions().
+    instructions: "",
     noiseGate: loadGateThreshold(),
     playbackBufferMs: normalizePlaybackBufferMs(localStorage.getItem(STORAGE_KEYS.playbackBufferMs)),
     // Default WebSocket: the proven path stays the first-run experience.
@@ -142,7 +181,6 @@ function loadGateThreshold() {
 function saveSettings(s) {
   localStorage.setItem(STORAGE_KEYS.directUrl, s.directUrl);
   localStorage.setItem(STORAGE_KEYS.voice, s.voice);
-  localStorage.setItem(STORAGE_KEYS.instructions, s.instructions);
   localStorage.setItem(STORAGE_KEYS.noiseGate, String(s.noiseGate));
   localStorage.setItem(STORAGE_KEYS.playbackBufferMs, String(s.playbackBufferMs));
   localStorage.setItem(STORAGE_KEYS.transport, s.transport);
@@ -1054,7 +1092,7 @@ function readSettingsFromForm() {
   return {
     directUrl: allowDirect && !pinnedUrl ? inputLbUrl.value.trim() : settings.directUrl,
     voice: inputVoice.value || DEFAULT_VOICE,
-    instructions: inputInstructions.value.trim() || DEFAULT_INSTRUCTIONS,
+    instructions: inputInstructions.value.trim(),
     noiseGate: readGateThreshold(),
     playbackBufferMs: normalizePlaybackBufferMs(inputPlaybackBuffer.value),
     transport: /** @type {"ws" | "webrtc"} */ (
@@ -1148,15 +1186,17 @@ settingsForm.addEventListener("submit", (event) => {
   const submitter = /** @type {HTMLButtonElement | null} */ ((/** @type {SubmitEvent} */ (event)).submitter);
   if (submitter?.value !== "save") return;
 
+  const previousInstructions = settings.instructions;
   settings = readSettingsFromForm();
   saveSettings(settings);
+  if (settings.instructions !== previousInstructions) void saveSharedInstructions(settings.instructions);
 
   // Voice + instructions can apply to a live session without reconnecting; a
   // changed connection URL only takes effect on the next restart. Speaker
   // output can switch live when the browser supports AudioContext.setSinkId;
   // mic device changes need a Restart (new getUserMedia stream).
   if (client && LIVE_STATES.has(currentState)) {
-    client.updateSession({ voice: settings.voice, instructions: settings.instructions });
+    client.updateSession({ voice: settings.voice });
     if (typeof client.setAudioOutputDevice === "function") {
       void client.setAudioOutputDevice(settings.audioOutputId);
     }
@@ -1494,7 +1534,6 @@ async function doStart(audioContext = null) {
     conversationKey: chat.conversationKey,
     conversationBackend: chat.conversationBackend,
     voice: settings.voice,
-    instructions: settings.instructions,
     startupGreeting,
     acquireMic: acquireMicStream,
     tools: activeToolDefs(),
@@ -1797,6 +1836,7 @@ async function onFatalError(err) {
 setState("idle");
 initGateArc();
 const configReady = fetchConfig();
+void loadSharedInstructions();
 // An idle page can follow work done through another browser/origin without
 // taking a voice slot or touching an active call's transcript/audio controls.
 let conversationRefreshPending = false;

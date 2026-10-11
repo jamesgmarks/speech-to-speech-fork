@@ -357,7 +357,7 @@ case-insensitively against the user's organisations from HF OAuth.
 | Microphone | Input device for capture. Applies on the next conversation / Restart. |
 | Speakers | Output device for assistant audio. Chrome/Edge can switch live via `AudioContext.setSinkId`; other browsers keep the system default. |
 | Voice | Qwen3-TTS speaker name (Aiden, Ryan, Dylan, Eric, Ono_Anna, Serena, Sohee, Uncle_Fu, Vivian) |
-| Instructions | System prompt sent in `session.update` once the connection opens |
+| Instructions | Shared backend setting (`/v1/settings`), same for every client and device; saved on the backend and applied to live sessions. Whatever a client sends in `session.update` is ignored |
 
 LocalStorage keys are namespaced `s2s.ws.*` (plus `s2s.transport` for the
 transport pick, and `s2s.audio.inputId` / `s2s.audio.outputId` for devices).

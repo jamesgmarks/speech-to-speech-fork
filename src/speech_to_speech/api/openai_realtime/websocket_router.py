@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from openai.types.realtime import (
     ConversationItemCreateEvent,
     ConversationItemTruncateEvent,
@@ -34,7 +34,7 @@ from speech_to_speech.agent_interactions import (
 from speech_to_speech.agent_session_inventory import AgentSessionInventory
 from speech_to_speech.api.openai_realtime.cloudflare_access import SessionGate
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
-from speech_to_speech.api.openai_realtime.origin_policy import allowed_origins_from_env
+from speech_to_speech.api.openai_realtime.origin_policy import allowed_origins_from_env, origin_allowed
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
 from speech_to_speech.api.openai_realtime.service import (
     PIPELINE_SAMPLE_RATE,
@@ -46,6 +46,7 @@ from speech_to_speech.api.openai_realtime.session_stream import (
     is_local_observer,
     serve_observer,
 )
+from speech_to_speech.api.openai_realtime.settings_store import SettingsStore, StaleSettings
 from speech_to_speech.api.openai_realtime.transports import (
     SessionTransport,
     WebSocketTransport,
@@ -581,8 +582,10 @@ def create_app(
     from speech_to_speech.api.openai_realtime.conversation_store import ConversationStore
 
     store = ConversationStore(conversation_store_dir) if conversation_store_dir else None
+    settings = SettingsStore(conversation_store_dir)
     for unit in pool:
         unit.service.conversation_store = store
+        unit.service.shared_instructions = settings.agent_instructions
 
     async def checkpoint_loop() -> None:
         while True:
@@ -735,9 +738,90 @@ def create_app(
 
     llm_proxy_usage = mount_llm_proxy(app, llm_proxy_config)
 
+    def _cors_headers(request: Request) -> dict[str, str]:
+        """Cross-origin browser access is only for the origins the session gate allows (never ``*``)."""
+        origin = request.headers.get("origin")
+        if origin is None or not origin_allowed(origin, gate.allowed_origins):
+            return {}
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Expose-Headers": "ETag",
+            "Vary": "Origin",
+        }
+
+    def _preflight(request: Request, methods: str) -> Response:
+        headers = _cors_headers(request)
+        if not headers:
+            return Response(status_code=403)
+        headers.update(
+            {
+                "Access-Control-Allow-Methods": methods,
+                "Access-Control-Allow-Headers": "Content-Type, If-Match",
+                "Access-Control-Max-Age": "600",
+            }
+        )
+        return Response(status_code=204, headers=headers)
+
+    async def _gated_json(request: Request, body: Callable[[], Any]) -> Response:
+        denial = await gate.denial(request.headers)
+        if denial:
+            return JSONResponse({"detail": denial}, status_code=403)
+        return JSONResponse(body(), headers=_cors_headers(request))
+
+    @app.options("/v1/voices")
+    async def voices_preflight(request: Request) -> Response:
+        return _preflight(request, "GET, OPTIONS")
+
     @app.get("/v1/voices")
-    async def voices_endpoint() -> dict[str, Any]:
-        return _voice_catalog(pool[0]) if pool else {"voices": [], "default": None}
+    async def voices_endpoint(request: Request) -> Response:
+        return await _gated_json(request, lambda: _voice_catalog(pool[0]) if pool else {"voices": [], "default": None})
+
+    @app.options("/v1/settings")
+    async def settings_preflight(request: Request) -> Response:
+        return _preflight(request, "GET, OPTIONS")
+
+    @app.get("/v1/settings")
+    async def settings_endpoint(request: Request) -> Response:
+        return await _gated_json(request, settings.snapshot)
+
+    @app.options("/v1/settings/agent-instructions")
+    async def instructions_preflight(request: Request) -> Response:
+        return _preflight(request, "PUT, OPTIONS")
+
+    @app.put("/v1/settings/agent-instructions")
+    async def save_instructions(request: Request) -> Response:
+        denial = await gate.denial(request.headers)
+        cors = _cors_headers(request)
+        if denial:
+            return JSONResponse({"detail": denial}, status_code=403)
+        try:
+            payload = await request.json()
+        except ValueError:
+            payload = None
+        text = payload.get("agent_instructions") if isinstance(payload, dict) else None
+        if not isinstance(text, str):
+            return JSONResponse({"detail": "agent_instructions must be a string"}, status_code=422, headers=cors)
+        try:
+            saved = settings.set_agent_instructions(text, request.headers.get("if-match"))
+        except StaleSettings:
+            return JSONResponse(
+                {"detail": "Instructions changed elsewhere; reload and retry.", **settings.snapshot()},
+                status_code=412,
+                headers=cors,
+            )
+        except ValueError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=422, headers=cors)
+        for unit in pool:
+            unit.service.shared_instructions = text
+            live = unit.service.apply_shared_instructions()
+            session = unit.session
+            if session is not None and session.transport is not None and session.session_id in live:
+                try:
+                    await session.transport.send_events([unit.service.build_session_updated(session.session_id)])
+                except Exception:  # noqa: BLE001 - the new value is already applied
+                    logger.debug("Could not announce updated instructions", exc_info=True)
+        return JSONResponse(saved, headers={**cors, "ETag": str(saved["etag"])})
 
     def _claim_unit(transport: SessionTransport | None) -> PipelineUnit | None:
         """Atomically (between asyncio yield points) reserve the first idle unit.
