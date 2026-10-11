@@ -186,3 +186,15 @@ class TestCors:
 
     def test_expose_etag(self, client):
         assert client.get("/v1/settings", headers={"Origin": LOCAL}).headers["access-control-expose-headers"] == "ETag"
+
+    def test_webrtc_offer_endpoint_has_cors_too(self, client):
+        preflight = client.options("/v1/realtime/calls", headers={"Origin": LOCAL})
+        assert preflight.status_code == 204
+        assert "POST" in preflight.headers["access-control-allow-methods"]
+        post = client.post("/v1/realtime/calls", content="x", headers={"Origin": LOCAL, "Content-Type": "text/plain"})
+        assert post.headers["access-control-allow-origin"] == LOCAL
+        assert post.headers["access-control-expose-headers"] == "Location"
+        assert client.options("/v1/realtime/calls", headers={"Origin": "https://evil.example"}).status_code == 403
+        refused = client.post("/v1/realtime/calls", content="x", headers={"Origin": "https://evil.example"})
+        assert refused.status_code == 403
+        assert "access-control-allow-origin" not in refused.headers

@@ -823,6 +823,19 @@ def create_app(
                     logger.debug("Could not announce updated instructions", exc_info=True)
         return JSONResponse(saved, headers={**cors, "ETag": str(saved["etag"])})
 
+    @app.options("/v1/realtime/calls")
+    async def calls_preflight(request: Request) -> Response:
+        return _preflight(request, "POST, OPTIONS")
+
+    @app.middleware("http")
+    async def calls_cors(request: Request, call_next: Callable[[Request], Any]) -> Response:
+        """A browser on another allowed origin (the dashboard) POSTs its WebRTC offer here, and reads the answer."""
+        response = await call_next(request)
+        if request.method == "POST" and request.url.path == "/v1/realtime/calls":
+            response.headers.update(_cors_headers(request))
+            response.headers["Access-Control-Expose-Headers"] = "Location"
+        return cast(Response, response)
+
     def _claim_unit(transport: SessionTransport | None) -> PipelineUnit | None:
         """Atomically (between asyncio yield points) reserve the first idle unit.
 
