@@ -648,9 +648,12 @@ without editing global or project MCP configuration. `create_agent_session`
 starts a named independent root SDK client in an existing directory;
 `send_agent_message`, `list_agent_sessions`, and `stop_agent_session` manage it.
 Messages queue while it works, and actual replies arrive in conversation and
-speech asynchronously. These clients retain their native context across voice
-turns and call reconnects, until stopped or the backend exits. They are separate
-from call-scoped native Agent children. They are not restored after a backend restart.
+speech asynchronously. These app-owned roots retain native context across voice
+turns and call reconnects, and are separate from call-scoped native Agent children.
+Backend shutdown closes their SDK connections. With a configured session-state
+file, Realtime server startup opens new connections that resume eligible saved
+native session IDs. This restores access to native history; it does not restart
+interrupted tasks or replay queued app messages. See the persistence details below.
 
 `list_external_agent_sessions` immediately returns native session IDs, names,
 working directories and activity from the read-only CLI inventory without a
@@ -707,10 +710,26 @@ See the [SDK's live permission control](https://code.claude.com/docs/en/agent-sd
 The change affects future tool requests; answer existing permission prompts
 separately. These controls work even when the microphone call is stopped and
 leave global Claude Code settings unchanged.
-App-owned session identities and modes are checkpointed locally with private
-file permissions. A service restart reconnects to the same native SDK histories;
-it does not replay queued tasks. Explicitly stopping a worker removes it from
-the automatic resume list. The SDK's native logs retain its conversation history.
+App-owned sessions are checkpointed locally with private file permissions using
+`--claude_agent_session_state_path` (default `~/.speech-to-speech/claude-sessions.json`).
+The file stores app and native session IDs, names, working directories, permission
+modes, and latest replies. Conversation history stays in the SDK's native logs.
+With session tools enabled, Realtime server startup resumes valid saved entries
+in existing directories, up to `--claude_agent_max_independent_sessions`, by passing
+each native ID to the SDK's `resume` option. A handler without a session-state path
+uses an in-memory registry. Sessions without a native ID are not checkpointed.
+Explicitly stopping a worker removes it from automatic resumption without erasing
+its native history. External terminal sessions are discovered separately and are
+never adopted into this registry.
+
+Graceful backend shutdown checkpoints eligible sessions before cancelling their
+active and queued app messages. Those messages and voice-call permission responders
+are not persisted; reconnect and message a restored worker to attach a responder.
+After an abrupt exit, recovery uses the last successful checkpoint. Invalid entries
+or missing directories are skipped. An unreadable or malformed registry is kept
+for recovery, with checkpoint writes disabled for that registry instance. If a
+resumed SDK connection fails, the worker reports failure; the app does not
+automatically retry its interrupted task.
 External terminal sessions remain listed with a disabled selector and an
 explanation: discovery and peer messaging do not provide a permission control
 connection. Change those modes in their terminal or Claude Remote Control.
