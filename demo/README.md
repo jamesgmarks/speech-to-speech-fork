@@ -139,6 +139,12 @@ Validation: `npm run test:agents:adapter` checks parsing and adapter behavior;
 > Browsers require **HTTPS or `localhost`** for `getUserMedia()` (mic + camera).
 > `127.0.0.1` and `localhost` both work; plain `http://192.168.x.y` does NOT.
 
+### Browser origin allowlist
+
+`/v1/realtime` and `/v1/realtime/calls` accept browser connections only from allowed page origins (requests with no `Origin`, i.e. non-browser clients, are always allowed). Defaults: the Personal OS dashboard (`localhost`/`127.0.0.1` on 4317 and 5173), this app's own pages (7860, 7861, 8765) and `https://voice.onlyjapaneseconversation.com`. Set `S2S_ALLOWED_ORIGINS` to a comma-separated list of origins to replace the defaults.
+
+Origins other than `localhost` / `127.0.0.1` (the tunnel hostname, a future dashboard hostname), and any request that came through the tunnel, must also present a valid Cloudflare Access JWT, which the backend verifies itself (RS256 signature against `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, issuer, audience, expiry). The browser never handles the token: the Access login sets an HttpOnly `CF_Authorization` cookie, the browser sends it with the WebSocket handshake, and Cloudflare forwards it as `Cf-Access-Jwt-Assertion` (service tokens are exchanged for the same JWT at the edge). Configure with `S2S_CF_ACCESS_TEAM` (team name or full team domain), `S2S_CF_ACCESS_AUD` (comma-separated application AUD tags) and `S2S_CF_ACCESS_REQUIRED` (default on; `false` disables the token check). With it on and the team/AUD unset, non-local browser origins are refused. `npm start` fills the team and AUD from `~/.cloudflared/speech-to-speech.yml`. Local non-browser clients (no `Origin`, not via the tunnel) are unaffected; anything arriving through the tunnel or a proxy (it carries `Cf-Connecting-Ip`, `Cf-Ray` or `X-Forwarded-For`) needs the token even with no or a forged `localhost` Origin.
+
 ### Protected Cloudflare Tunnel
 
 Keep the speech backend on loopback. Configure a self-hosted Cloudflare Access

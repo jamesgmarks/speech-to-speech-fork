@@ -108,8 +108,11 @@ class _ServerEnv:
             text_prompt_queue=self.text_prompt_queue,
             handlers=[],
         )
-        self.app = create_app(pool=[self.unit], stop_event=self.stop_event)
         self.port = _free_port()
+        # Browser tests load their page from this same server, so its own origin must be allowed.
+        self.app = create_app(
+            pool=[self.unit], stop_event=self.stop_event, allowed_origins=frozenset({f"http://127.0.0.1:{self.port}"})
+        )
         self._server_thread: threading.Thread | None = None
 
     def start(self):

@@ -108,7 +108,12 @@ async function main() {
       return route.hostname === hostname && access?.required === true && access.teamName && access.audTag?.length;
     })) throw new Error("The tunnel configuration must protect the entire app hostname with Cloudflare Access origin validation.");
     execFileSync(cloudflared, ["tunnel", "--config", tunnelConfig, "ingress", "validate"], { stdio: "pipe" });
-    tunnel = { hostname, id: config.tunnel };
+    const accesses = routes.map(route => route.originRequest?.access || config.originRequest?.access);
+    tunnel = {
+      hostname, id: config.tunnel,
+      // The backend verifies the Access JWT itself for browsers on non-local origins.
+      access: { S2S_CF_ACCESS_TEAM: accesses[0].teamName, S2S_CF_ACCESS_AUD: [...new Set(accesses.flatMap(access => access.audTag))].join(",") },
+    };
   }
   console.log(`Model settings: ${path.relative(root, launcher)}`);
   console.log("Saved custom voices and the shared ongoing conversation are retained.");
@@ -116,7 +121,7 @@ async function main() {
   for (const port of [8765, 7860, ...(tunnel ? [7861] : [])]) await checkPort(port);
   mkdirSync(logs, { recursive: true, mode: 0o700 });
   chmodSync(logs, 0o700);
-  start("backend", python, [launcher, ...backendArgs], { HF_HUB_OFFLINE: process.env.HF_HUB_OFFLINE || "1" });
+  start("backend", python, [launcher, ...backendArgs], { HF_HUB_OFFLINE: process.env.HF_HUB_OFFLINE || "1", ...tunnel?.access });
   await waitFor("Speech backend", () => httpReady("http://127.0.0.1:8765/v1/pool"));
   const frontendEnv = {
     SPEECH_TO_SPEECH_URL: "ws://127.0.0.1:8765/v1/realtime",

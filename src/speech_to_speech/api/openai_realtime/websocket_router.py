@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -21,6 +22,9 @@ from openai.types.realtime import (
     ResponseCreateEvent,
     SessionUpdateEvent,
 )
+from openai.types.realtime.realtime_conversation_item_function_call_output import (
+    RealtimeConversationItemFunctionCallOutput,
+)
 
 from speech_to_speech.agent_interactions import (
     AgentPermissionModeSet,
@@ -28,11 +32,19 @@ from speech_to_speech.agent_interactions import (
     AgentSessionPermissionModeSet,
 )
 from speech_to_speech.agent_session_inventory import AgentSessionInventory
+from speech_to_speech.api.openai_realtime.cloudflare_access import SessionGate
 from speech_to_speech.api.openai_realtime.llm_proxy import LLMProxyConfig, mount_llm_proxy
+from speech_to_speech.api.openai_realtime.origin_policy import allowed_origins_from_env
 from speech_to_speech.api.openai_realtime.pipeline_unit import PipelineUnit, SessionState
 from speech_to_speech.api.openai_realtime.service import (
     PIPELINE_SAMPLE_RATE,
     build_error_event,
+)
+from speech_to_speech.api.openai_realtime.session_stream import (
+    ObservedTransport,
+    StreamHub,
+    is_local_observer,
+    serve_observer,
 )
 from speech_to_speech.api.openai_realtime.transports import (
     SessionTransport,
@@ -362,6 +374,8 @@ def _release_session(unit: PipelineUnit, session_id: str) -> None:
         # Already released (e.g. duplicate close callbacks racing).
         return
     old_session.released_at = time.monotonic()
+    if isinstance(old_session.transport, ObservedTransport):
+        old_session.transport.finish()
     # The send loop can be parked on output from an unclaimed internal
     # prefetch. Invalidate that response while its connection state is still
     # registered, and drop the per-session held item so SESSION_END can drain.
@@ -446,6 +460,8 @@ async def _dispatch_client_event(
                 ]
             )
             return
+        if isinstance(transport, ObservedTransport):
+            transport.observe_user_audio(base64.b64decode(event.audio))
         chunks = service.handle_audio_append(session_id, event)
         rt_cfg = service._state(session_id).runtime_config
         for chunk in chunks:
@@ -487,6 +503,10 @@ async def _dispatch_client_event(
                 await transport.send_events([VoiceCatalogEvent(**_voice_catalog(unit))])
 
     elif isinstance(event, ConversationItemCreateEvent):
+        if isinstance(transport, ObservedTransport) and isinstance(
+            event.item, RealtimeConversationItemFunctionCallOutput
+        ):
+            transport.observe_tool_result(event.item.call_id, event.item.output)
         events = service.handle_conversation_item_create(session_id, event)
         if events:
             await send_correlated(events)
@@ -552,7 +572,12 @@ def create_app(
     stop_event: ThreadingEvent,
     llm_proxy_config: LLMProxyConfig | None = None,
     conversation_store_dir: str | None = None,
+    allowed_origins: frozenset[str] | None = None,
+    session_gate: SessionGate | None = None,
 ) -> FastAPI:
+    """Browser sessions are gated by ``session_gate``: by default the origins in ``allowed_origins`` (else
+    ``S2S_ALLOWED_ORIGINS`` or the built-in list), plus a verified Cloudflare Access token for non-local origins."""
+    gate = session_gate or SessionGate(allowed_origins if allowed_origins is not None else allowed_origins_from_env())
     from speech_to_speech.api.openai_realtime.conversation_store import ConversationStore
 
     store = ConversationStore(conversation_store_dir) if conversation_store_dir else None
@@ -600,6 +625,19 @@ def create_app(
                     pass
 
     app = FastAPI(lifespan=lifespan)
+    stream_hub = StreamHub()
+
+    @app.websocket("/v1/stream")
+    async def stream_endpoint(ws: WebSocket) -> None:
+        """Read-only live mirror of voice sessions (levels, transcripts, tool calls) for local observers."""
+        if not is_local_observer(ws.headers, ws.client.host if ws.client else None):
+            await ws.close(code=1008, reason="The session stream is for local, non-browser clients only")
+            return
+        await ws.accept()
+        try:
+            await serve_observer(ws, stream_hub, stop_event)
+        except Exception:  # noqa: BLE001 - observers disconnect all the time
+            logger.debug("Stream observer went away", exc_info=True)
 
     @app.get("/v1/conversation/audio/{key}/{audio_id}.wav")
     async def conversation_audio(key: str, audio_id: str) -> FileResponse:
@@ -735,12 +773,17 @@ def create_app(
 
     @app.websocket("/v1/realtime")
     async def realtime_endpoint(ws: WebSocket) -> None:
+        denial = await gate.denial(ws.headers)
+        if denial is not None:
+            logger.warning("Rejected realtime connection from origin %s: %s", ws.headers.get("origin"), denial)
+            await ws.close(code=1008, reason=denial)
+            return
         offered_subprotocols = {
             protocol.strip() for protocol in ws.headers.get("sec-websocket-protocol", "").split(",")
         }
         await ws.accept(subprotocol="realtime" if "realtime" in offered_subprotocols else None)
 
-        transport = WebSocketTransport(ws)
+        transport = ObservedTransport(WebSocketTransport(ws), stream_hub)
         unit = await _claim_after_disconnect(transport)
         if unit is None:
             logger.warning(f"Rejected connection: all {len(pool)} pipeline slots in use")
@@ -766,6 +809,7 @@ def create_app(
                 ws.query_params.get("conversation_key"), ws.query_params.get("conversation_backend")
             )
             unit.session.session_id = session_id
+            transport.start(session_id)
             logger.info(f"Client connected to pipeline {unit.index} (session {session_id})")
 
             # Defensive: drain edge queues and reset events so stale data from a
@@ -870,6 +914,10 @@ def create_app(
         events flow over the 'oai-events' data channel using the same JSON
         protocol as the WebSocket transport.
         """
+        denial = await gate.denial(request.headers)
+        if denial is not None:
+            logger.warning("Rejected WebRTC offer from origin %s: %s", request.headers.get("origin"), denial)
+            return Response(content=denial, status_code=403, media_type="text/plain")
         if not WEBRTC_AVAILABLE:
             return Response(
                 content="WebRTC support requires the 'webrtc' extra: pip install 'speech-to-speech[webrtc]'",
@@ -931,10 +979,12 @@ def create_app(
             _release_session(unit, session_id)
 
         async def _on_client_event(raw: dict[str, Any]) -> None:
-            assert session is not None  # callbacks only fire after setup()
-            await _dispatch_client_event(unit, session_id, raw, session, transport_kind="webrtc")
+            assert observed is not None  # callbacks only fire after setup()
+            await _dispatch_client_event(unit, session_id, raw, observed, transport_kind="webrtc")
 
         def _on_audio(pcm: bytes) -> None:
+            if observed is not None:
+                observed.observe_user_audio(pcm)
             chunks = unit.service.append_pcm(session_id, pcm, PIPELINE_SAMPLE_RATE)
             if not chunks:
                 return
@@ -951,6 +1001,7 @@ def create_app(
         # must release the unit, or it stays occupied forever with no peer
         # attached — the connect watchdog only exists once negotiate() ran.
         session = None
+        observed: ObservedTransport | None = None
         try:
             config = rtc_configuration_from_env()
             pc = RTCPeerConnection(configuration=config) if config is not None else RTCPeerConnection()
@@ -962,7 +1013,9 @@ def create_app(
                 on_closed=_on_closed,
             )
             session.setup()
-            unit.session.transport = session
+            observed = ObservedTransport(session, stream_hub)
+            observed.start(session_id)
+            unit.session.transport = observed
         except Exception as e:  # noqa: BLE001
             logger.error(f"WebRTC session setup failed (session {session_id}): {type(e).__name__}: {e}")
             if session is not None:
