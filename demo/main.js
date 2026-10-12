@@ -43,6 +43,8 @@ const STORAGE_KEYS = {
   transport: "s2s.transport",
   audioInputId: "s2s.audio.inputId",
   audioOutputId: "s2s.audio.outputId",
+  // Voice agent permission mode, applied at the start of every session.
+  permissionMode: "s2s.agent.permissionMode",
 };
 
 // ── Noise gate ──────────────────────────────────────────────────────────────
@@ -428,7 +430,23 @@ const chat = new ChatView({
 // and tears down when the server reports the budget is spent.
 const account = new Account();
 const agentPermissions = new AgentPermissions();
-document.getElementById("permission-mode")?.addEventListener("change", e => client?.setAgentPermissionMode(/** @type {HTMLSelectElement} */ (e.target).value));
+const permissionModeSelect = /** @type {HTMLSelectElement | null} */ (document.getElementById("permission-mode"));
+/** Shows `mode` in the permission picker, adding it if the page doesn't list it. */
+function showPermissionMode(mode) {
+  if (!permissionModeSelect) return;
+  if (!Array.from(permissionModeSelect.options).some(o => o.value === mode)) permissionModeSelect.add(new Option(mode, mode));
+  permissionModeSelect.value = mode;
+}
+// The choice is per browser: shown before any session, saved on change, and re-sent to each new session.
+if (permissionModeSelect) {
+  const saved = localStorage.getItem(STORAGE_KEYS.permissionMode);
+  if (saved) showPermissionMode(saved);
+  permissionModeSelect.disabled = false;
+  permissionModeSelect.addEventListener("change", () => {
+    localStorage.setItem(STORAGE_KEYS.permissionMode, permissionModeSelect.value);
+    client?.setAgentPermissionMode(permissionModeSelect.value);
+  });
+}
 let limiterOn = false;
 let heartbeatTimer = 0;
 let trackedSessionId = "";
@@ -1622,10 +1640,9 @@ async function doStart(audioContext = null) {
   c.addEventListener("agent-permission-voice", e => agentPermissions.voice(e.detail));
   c.addEventListener("agent-permission-mode", e => {
     if (client !== c) return;
-    const select = /** @type {HTMLSelectElement} */ (document.getElementById("permission-mode"));
-    if (!Array.from(select.options).some(o => o.value === e.detail.mode)) select.add(new Option(e.detail.mode, e.detail.mode));
-    select.value = e.detail.mode;
-    select.disabled = false;
+    const saved = localStorage.getItem(STORAGE_KEYS.permissionMode);
+    if (saved && saved !== e.detail.mode) c.setAgentPermissionMode(saved);
+    showPermissionMode(saved || e.detail.mode);
   });
   c.addEventListener("agent-permission-error", e => agentPermissions.error(e.detail));
 
