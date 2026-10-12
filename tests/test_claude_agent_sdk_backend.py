@@ -861,3 +861,30 @@ def test_peer_sessions_do_not_inherit_voice_output_token_cap():
         )
     ).options
     assert options.env == {"CLAUDE_CODE_MAX_OUTPUT_TOKENS": "", "CLAUDE_CODE_MAX_RETRIES": "1"}
+
+
+@pytest.mark.parametrize(
+    "tool", ["mcp__speech_to_speech__list_agent_sessions", "mcp__speech_to_speech__read_agent_session"]
+)
+def test_read_only_tools_are_allowed_without_a_prompt(tool):
+    events = Queue()
+    FakeClient.permission = (tool, {})
+    req = request()
+    list(handler(text_output_queue=events, permission_timeout_s=0.1).process(req))
+    assert FakeClient.permission_result.behavior == "allow"
+    assert events.empty()
+
+
+def test_a_closed_connection_ends_the_turn_without_waiting_for_the_prompt():
+    from threading import Thread
+
+    events = Queue()
+    FakeClient.permission = ("mcp__speech_to_speech__send_agent_message", {"message": "hi"})
+    req = request()
+    worker = Thread(target=lambda: list(handler(text_output_queue=events, permission_timeout_s=30).process(req)))
+    worker.start()
+    assert events.get(timeout=1).event.type.endswith("requested")
+    req.runtime_config.connection_active = False
+    worker.join(2)
+    assert not worker.is_alive()
+    assert FakeClient.permission_result.behavior == "deny"

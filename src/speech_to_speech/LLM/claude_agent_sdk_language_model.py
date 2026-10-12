@@ -51,6 +51,17 @@ from speech_to_speech.pipeline.events import AgentBackgroundEvent, AgentPermissi
 from speech_to_speech.pipeline.handler_types import LLMIn, LLMOut
 from speech_to_speech.pipeline.messages import EndOfResponse
 
+# Tools that only look, never change anything: allowed without a prompt unless the permission mode says otherwise.
+# Anything that sends, creates, stops or edits still asks.
+READ_ONLY_TOOLS = frozenset(
+    {
+        "mcp__speech_to_speech__list_agent_sessions",
+        "mcp__speech_to_speech__list_external_agent_sessions",
+        "mcp__speech_to_speech__read_agent_session",
+        "ListAgents",
+    }
+)
+
 
 class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
     """Use Claude Code's agent loop while retaining pipeline output semantics."""
@@ -73,7 +84,7 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
         cwd: str | None = None,
         cli_path: str | None = None,
         permission_mode: str = "default",
-        permission_timeout_s: float = 300.0,
+        permission_timeout_s: float = 60.0,
         text_output_queue: Queue | None = None,
         allowed_tools: list[str] | None = None,
         setting_sources: list[str] | None = None,
@@ -224,7 +235,11 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
         def cancelled() -> bool:
             return self.stop_event.is_set() or (
                 turn is not None
-                and (self._turn_is_cancelled(turn) or not self._turn_is_latest(turn.turn_id, turn.turn_revision))
+                and (
+                    not turn.runtime_config.connection_active
+                    or self._turn_is_cancelled(turn)
+                    or not self._turn_is_latest(turn.turn_id, turn.turn_revision)
+                )
             )
 
         def permission_cancelled() -> bool:
@@ -595,6 +610,8 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
         async def can_use_tool(tool_name, input_data, context):
             if self.text_output_queue is None or cancelled():
                 return PermissionResultDeny(message="No permission responder is connected.")
+            if tool_name in READ_ONLY_TOOLS:
+                return PermissionResultAllow(updated_input=input_data)
             broker = turn.runtime_config.agent_interactions
             stream = owned_stream()
             background = background_session or (

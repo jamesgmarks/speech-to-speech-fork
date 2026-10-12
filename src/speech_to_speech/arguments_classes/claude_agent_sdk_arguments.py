@@ -123,7 +123,7 @@ class ClaudeAgentSDKArguments(LanguageModelBaseArguments):
     )
 
     claude_agent_permission_timeout_s: float = field(
-        default=300.0,
+        default=60.0,
         metadata={
             "help": "Time allowed to answer each permission prompt or agent question. Generation timeout pauses while waiting."
         },
