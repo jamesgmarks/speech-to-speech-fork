@@ -172,6 +172,16 @@ class StreamHub:
             self._partial(session_id, "user", item_id, event.delta)
         elif kind == "conversation.item.input_audio_transcription.completed":
             self._final(session_id, "user", item_id, event.transcript)
+        elif kind == "conversation.item.created":
+            # Messages the client puts into the conversation: typed ones, and the remembered history a new session
+            # replays (both roles, or the replayed conversation would show only what the user said). Spoken user
+            # messages and the assistant's own replies arrive through the transcription/response events instead.
+            item = event.item
+            role = getattr(item, "role", "")
+            if role in ("user", "assistant"):
+                text = "".join(getattr(part, "text", None) or "" for part in getattr(item, "content", None) or [])
+                if text.strip() and getattr(item, "id", None):
+                    self._final(session_id, role, item.id, text)
         elif kind in ("response.output_audio_transcript.delta", "response.output_text.delta"):
             self._partial(session_id, "assistant", item_id, event.delta)
         elif kind == "response.output_audio_transcript.done":

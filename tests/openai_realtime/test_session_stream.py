@@ -131,6 +131,32 @@ class TestHub:
             ("Hello.", True, "user"),
         ]
 
+    def test_replayed_history_keeps_both_sides_of_the_conversation(self):
+        hub = StreamHub()
+        subscription = hub.subscribe()
+        history = [
+            ("user", "m1", "input_text", "and there we have it"),
+            ("assistant", "m2", "output_text", "Good news."),
+        ]
+        for role, item_id, part_type, text in history:
+            item = SimpleNamespace(id=item_id, role=role, content=[SimpleNamespace(type=part_type, text=text)])
+            hub.observe_server_event("s1", event("conversation.item.created", item=item))
+        assert [(m["role"], m["text"], m["final"]) for m in drain(subscription)] == [
+            ("user", "and there we have it", True),
+            ("assistant", "Good news.", True),
+        ]
+
+    def test_typed_user_messages_become_final_transcripts(self):
+        hub = StreamHub()
+        subscription = hub.subscribe()
+        typed = SimpleNamespace(id="m1", role="user", content=[SimpleNamespace(type="input_text", text="what is up?")])
+        hub.observe_server_event("s1", event("conversation.item.created", item=typed))
+        spoken = SimpleNamespace(id="m2", role="user", content=[SimpleNamespace(type="input_audio", transcript=None)])
+        hub.observe_server_event("s1", event("conversation.item.created", item=spoken))
+        empty = SimpleNamespace(id="m3", role="assistant", content=[SimpleNamespace(type="output_text", text="")])
+        hub.observe_server_event("s1", event("conversation.item.created", item=empty))
+        assert [(m["role"], m["text"], m["final"]) for m in drain(subscription)] == [("user", "what is up?", True)]
+
     def test_assistant_audio_and_text_transcripts(self):
         hub = StreamHub()
         subscription = hub.subscribe()
