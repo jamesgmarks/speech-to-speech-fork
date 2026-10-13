@@ -391,6 +391,53 @@ class TestStreamEndpoint:
         assert [(t["phase"], t["name"]) for t in tools] == [("call", "lookup"), ("result", "lookup")]
         assert tools[0]["arguments"] == '{"city": "Toronto"}' and tools[1]["output"] == "12 degrees"
 
+    def test_a_typed_message_reaches_the_observer(self, setup):
+        app, _ = setup
+        with local_client(app) as client, client.websocket_connect("/v1/stream") as observer:
+            observer.receive_json()
+            with client.websocket_connect("/v1/realtime") as ws:
+                ws.receive_json()
+                ws.send_json(
+                    {
+                        "type": "conversation.item.create",
+                        "item": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "hello there"}],
+                        },
+                    }
+                )
+                while True:
+                    message = observer.receive_json()
+                    if message["type"] == "transcript":
+                        break
+            assert (message["role"], message["text"], message["final"]) == ("user", "hello there", True)
+
+    def test_replayed_history_keeps_its_own_item_ids_on_the_stream(self, setup):
+        app, _ = setup
+        with local_client(app) as client, client.websocket_connect("/v1/stream") as observer:
+            observer.receive_json()
+            with client.websocket_connect("/v1/realtime") as ws:
+                ws.receive_json()
+                for role, part, item_id in (("user", "input_text", "msg_a"), ("assistant", "output_text", "msg_b")):
+                    ws.send_json(
+                        {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "id": item_id,
+                                "type": "message",
+                                "role": role,
+                                "content": [{"type": part, "text": "x"}],
+                            },
+                        }
+                    )
+                seen = []
+                while len(seen) < 2:
+                    message = observer.receive_json()
+                    if message["type"] == "transcript":
+                        seen.append((message["role"], message["item_id"]))
+            assert seen == [("user", "msg_a"), ("assistant", "msg_b")]
+
     def test_a_late_observer_is_told_which_sessions_are_live(self, setup):
         app, _ = setup
         with local_client(app) as client, client.websocket_connect("/v1/realtime") as ws:
