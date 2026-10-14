@@ -33,12 +33,15 @@ DRAW_TOOL_DESCRIPTION = (
     "fill {x, y, color, tolerance?}; text {x, y, text, color, fontSize?}; clear {}; "
     "layer.add {name?}; layer.delete {layer}; layer.move {layer, to}; layer.visibility {layer, visible}; "
     "layer.select {layer}; layer.rename {layer, name}; layer.color {layer, color?} (a #rrggbb label for the layer chip; omit color to clear); undo {}; redo {}; "
-    'pixels {x, y, width, height, layer?, plus EITHER palette:["#rrggbb"|"#rrggbbaa"|"transparent", ...up to 36] and rows:["0110", ...] '
-    '(one string per pixel row, one character per pixel: 0-9 then a-z indexes the palette) OR data:<base64 of raw bytes, row by row> with sourceWidth, sourceHeight and format:"rgba"(default)|"rgb"}. '
+    'pixels {x, y, width, height, layer?, plus EITHER palette:["#rrggbb"|"#rrggbbaa"|"transparent"|null, ...up to 36] and rows:["0110", ...] '
+    '(one string per pixel row, one character per pixel: 0-9 then a-z indexes the palette; "." is always a transparent pixel) OR data:<base64 of raw bytes, row by row> with sourceWidth, sourceHeight and format:"rgba"(default)|"rgb"}. '
     "`pixels` draws a whole sprite or picture in ONE command: the pixel grid is placed at x,y and scaled (crisp, not smoothed) to width x height board pixels, "
     "like a pasted image; it lands on the layer as one undo step and is then selected. The grid is at most 128x128 pixels (anything larger is rejected, so split it into several pixels commands). "
     "Big pictures: tile many blocks on ONE layer, each at its own x,y; edges are rounded, so blocks laid edge to edge (next x = previous x + width) leave no seams, "
     "later blocks draw over earlier ones (transparent pixels let the earlier ones show; add replace:true to overwrite the area completely), and blocks sent close together undo as one step. "
+    'TRANSPARENCY is supported, pixels do NOT all need a color: a palette entry of "transparent" (or null) paints nothing, so whatever is already on the layer and the layers below shows through; '
+    '"#rrggbbaa" gives partial transparency (aa is hex alpha: 00 invisible, 80 half, ff opaque); in raw format rgba the 4th byte of each pixel is alpha (rgb is always opaque). '
+    "Transparent pixels also let earlier tiles show; replace:true instead erases the whole block area first, so transparent pixels there become empty. "
     'Prefer palette+rows: e.g. a 4x4 heart-ish sprite as palette ["transparent","#ef4444"], rows ["0110","1111","0110","0000"]. '
     "Build diagrams from these: boxes (rect with a text label inside), arrows between them, ellipses for nodes, "
     "a separate layer for your own additions so James's drawing is never covered (layer.add then draw, or name `layer`). "

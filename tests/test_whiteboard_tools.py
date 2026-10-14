@@ -77,6 +77,8 @@ def test_a_pixel_block_is_passed_through_and_the_tool_documents_it(daemon):
     whiteboard_tools.draw_on_whiteboard([block])
     assert daemon == [("POST", "/whiteboard/commands?token=tok", {"commands": [block]})]
     assert "pixels {" in whiteboard_tools.DRAW_TOOL_DESCRIPTION and "128x128" in whiteboard_tools.DRAW_TOOL_DESCRIPTION
+    for syntax in ("TRANSPARENCY", '"transparent"', "|null", "#rrggbbaa", "replace:true", '"." is always'):
+        assert syntax in whiteboard_tools.DRAW_TOOL_DESCRIPTION
 
 
 def test_a_refused_request_explains_why(daemon):
