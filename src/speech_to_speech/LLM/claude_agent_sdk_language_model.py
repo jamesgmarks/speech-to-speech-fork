@@ -260,7 +260,7 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
                 app_tools.extend(self._whiteboard_tools(permission_cancelled))
                 sdk_kwargs["system_prompt"]["append"] += (
                     "\nJames's Personal OS whiteboard: use read_whiteboard to look at what he has drawn or written "
-                    "(it returns an image and the layer list), and draw_on_whiteboard to draw on it with every tool he has: "
+                    "(it returns an image and the layer list; pass `layer` to see one layer on its own), and draw_on_whiteboard to draw on it with every tool he has: "
                     "shapes, arrows, text, fill, freehand, and layers. For a visual conversation, look first, then add your "
                     "diagram on a new layer so you never cover what he drew."
                 )
@@ -431,7 +431,7 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
             if cancelled():
                 return failure("The owning voice request has ended.")
             try:
-                return await asyncio.to_thread(whiteboard_tools.read_whiteboard)
+                return await asyncio.to_thread(whiteboard_tools.read_whiteboard, args.get("layer"))
             except whiteboard_tools.WhiteboardError as exc:
                 return failure(str(exc))
 
@@ -447,7 +447,7 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
             tool(
                 whiteboard_tools.READ_TOOL_NAME,
                 whiteboard_tools.READ_TOOL_DESCRIPTION,
-                {"type": "object", "properties": {}, "additionalProperties": False},
+                whiteboard_tools.READ_TOOL_SCHEMA,
             )(read),
             tool(
                 whiteboard_tools.DRAW_TOOL_NAME,

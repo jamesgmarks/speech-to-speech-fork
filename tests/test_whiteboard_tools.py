@@ -65,6 +65,21 @@ def test_reading_returns_the_snapshot_as_an_mcp_image(daemon):
     assert daemon == [("GET", "/whiteboard/snapshot.png?token=tok", None)]
 
 
+def test_reading_one_layer_asks_the_daemon_for_just_that_layer(daemon):
+    whiteboard_tools.read_whiteboard("Layer 1")
+    whiteboard_tools.read_whiteboard(0)
+    assert [path for _, path, _ in daemon] == [
+        "/whiteboard/snapshot.png?token=tok&layer=Layer+1",
+        "/whiteboard/snapshot.png?token=tok&layer=0",
+    ]
+
+
+def test_the_read_tool_advertises_the_optional_layer_argument():
+    properties = whiteboard_tools.READ_TOOL_SCHEMA["properties"]
+    assert set(properties) == {"layer"} and "required" not in whiteboard_tools.READ_TOOL_SCHEMA
+    assert "layer" in whiteboard_tools.READ_TOOL_DESCRIPTION
+
+
 def test_drawing_posts_the_commands_and_reports_the_batch(daemon):
     commands = [{"type": "layer.add", "name": "Agent"}]
     result = whiteboard_tools.draw_on_whiteboard(commands)

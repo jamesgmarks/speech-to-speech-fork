@@ -22,8 +22,19 @@ DRAW_TOOL_NAME = "draw_on_whiteboard"
 
 READ_TOOL_DESCRIPTION = (
     "Look at James's Personal OS whiteboard: returns the current drawing (all visible layers flattened) as an image, "
-    "plus the layer names. Read-only. Fails if no Whiteboard widget is open on a dashboard."
+    "plus the layer names. Pass `layer` (a layer's id, name, or stack index; 0 is the bottom) to see just that one layer on its own "
+    "over the paper color, hidden layers included. Read-only. Fails if no Whiteboard widget is open on a dashboard."
 )
+READ_TOOL_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "layer": {
+            "type": ["string", "integer"],
+            "description": "Optional. The layer to view alone: its id, name, or stack index (0 is the bottom). Omit for the whole board.",
+        },
+    },
+    "additionalProperties": False,
+}
 DRAW_TOOL_DESCRIPTION = (
     "Draw on James's Personal OS whiteboard with a batch of commands, applied in order. The canvas is 1280x800 pixels, "
     "origin top-left; colors are #rrggbb; every command may name a `layer` (id or name; default: the active layer). "
@@ -76,8 +87,8 @@ def _token() -> str:
         raise WhiteboardError("Can't read the Personal OS token (~/.personal-os/token).") from exc
 
 
-def _request(path: str, body: bytes | None = None) -> tuple[bytes, Any]:
-    url = f"{_daemon_url()}{path}?token={_token()}"
+def _request(path: str, body: bytes | None = None, query: dict[str, str] | None = None) -> tuple[bytes, Any]:
+    url = f"{_daemon_url()}{path}?{urllib.parse.urlencode({'token': _token(), **(query or {})})}"
     request = urllib.request.Request(url, data=body, method="POST" if body is not None else "GET")
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:  # noqa: S310 - fixed local daemon URL
@@ -93,9 +104,9 @@ def _request(path: str, body: bytes | None = None) -> tuple[bytes, Any]:
         raise WhiteboardError("Can't reach the Personal OS daemon. Is it running?") from exc
 
 
-def read_whiteboard() -> dict[str, Any]:
-    """An MCP tool result holding the snapshot PNG as an image."""
-    png, headers = _request("/whiteboard/snapshot.png")
+def read_whiteboard(layer: str | int | None = None) -> dict[str, Any]:
+    """An MCP tool result holding the snapshot PNG as an image: the whole board, or just `layer` when given."""
+    png, headers = _request("/whiteboard/snapshot.png", query=None if layer is None else {"layer": str(layer)})
     content: list[dict[str, Any]] = [
         {"type": "image", "data": base64.b64encode(png).decode("ascii"), "mimeType": "image/png"}
     ]
