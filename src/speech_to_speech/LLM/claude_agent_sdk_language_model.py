@@ -36,6 +36,7 @@ from speech_to_speech.agent_terminal import (
     AgentTerminalLauncher,
     merge_mcp_config,
 )
+from speech_to_speech.LLM import whiteboard_tools
 from speech_to_speech.LLM.base_openai_compatible_language_model import (
     BaseOpenAICompatibleHandler,
     ProviderEvent,
@@ -58,6 +59,9 @@ READ_ONLY_TOOLS = frozenset(
         "mcp__speech_to_speech__list_agent_sessions",
         "mcp__speech_to_speech__list_external_agent_sessions",
         "mcp__speech_to_speech__read_agent_session",
+        "mcp__speech_to_speech__read_whiteboard",
+        # Only changes the whiteboard widget, and its undo undoes it.
+        "mcp__speech_to_speech__draw_on_whiteboard",
         "ListAgents",
     }
 )
@@ -227,6 +231,8 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
         turn = optional_kwargs.get("turn")
         if turn is not None and turn.runtime_config.agent_permission_mode and not optional_kwargs.get("compaction"):
             sdk_kwargs["permission_mode"] = turn.runtime_config.agent_permission_mode
+        if turn is not None and turn.runtime_config.agent_cwd and not optional_kwargs.get("compaction"):
+            sdk_kwargs["cwd"] = turn.runtime_config.agent_cwd
         stream_ref: list[_ClaudeStream] = []
 
         def owned_stream() -> _ClaudeStream | None:
@@ -250,6 +256,14 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
 
         if turn is not None and not optional_kwargs.get("compaction"):
             app_tools = self._independent_session_tools(turn) if self.session_tools else []
+            if self.session_tools:
+                app_tools.extend(self._whiteboard_tools(permission_cancelled))
+                sdk_kwargs["system_prompt"]["append"] += (
+                    "\nJames's Personal OS whiteboard: use read_whiteboard to look at what he has drawn or written "
+                    "(it returns an image and the layer list), and draw_on_whiteboard to draw on it with every tool he has: "
+                    "shapes, arrows, text, fill, freehand, and layers. For a visual conversation, look first, then add your "
+                    "diagram on a new layer so you never cover what he drew."
+                )
             if self.terminal_tool:
 
                 async def launch_agent_terminal(args: dict[str, Any]) -> dict[str, Any]:
@@ -409,6 +423,39 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
         )
         return ClaudeSDKClient(options=ClaudeAgentOptions(**options))
 
+    def _whiteboard_tools(self, cancelled: Callable[[], bool]) -> list[Any]:
+        def failure(message: str) -> dict[str, Any]:
+            return {"content": [{"type": "text", "text": message}], "isError": True}
+
+        async def read(args: dict[str, Any]) -> dict[str, Any]:
+            if cancelled():
+                return failure("The owning voice request has ended.")
+            try:
+                return await asyncio.to_thread(whiteboard_tools.read_whiteboard)
+            except whiteboard_tools.WhiteboardError as exc:
+                return failure(str(exc))
+
+        async def draw(args: dict[str, Any]) -> dict[str, Any]:
+            if cancelled():
+                return failure("The owning voice request has ended.")
+            try:
+                return await asyncio.to_thread(whiteboard_tools.draw_on_whiteboard, args["commands"])
+            except whiteboard_tools.WhiteboardError as exc:
+                return failure(str(exc))
+
+        return [
+            tool(
+                whiteboard_tools.READ_TOOL_NAME,
+                whiteboard_tools.READ_TOOL_DESCRIPTION,
+                {"type": "object", "properties": {}, "additionalProperties": False},
+            )(read),
+            tool(
+                whiteboard_tools.DRAW_TOOL_NAME,
+                whiteboard_tools.DRAW_TOOL_DESCRIPTION,
+                whiteboard_tools.DRAW_TOOL_SCHEMA,
+            )(draw),
+        ]
+
     def _independent_session_tools(self, turn: _Turn) -> list[Any]:
         # Each foreground SDK client has its own asyncio loop. Cache discovery
         # within this tool set without sharing an asyncio.Lock across turns.
@@ -433,7 +480,7 @@ class ClaudeAgentSDKModelHandler(BaseOpenAICompatibleHandler):
                 raise ValueError("Choose an existing directory.")
             target = Path(args["directory"]).expanduser()
             if not target.is_absolute():
-                target = self._terminal_launcher.cwd / target
+                target = Path(turn.runtime_config.agent_cwd or self._terminal_launcher.cwd) / target
             target = target.resolve(strict=True)
             if not target.is_dir():
                 raise ValueError("Choose an existing directory.")
