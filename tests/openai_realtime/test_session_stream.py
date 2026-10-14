@@ -438,6 +438,20 @@ class TestStreamEndpoint:
                         seen.append((message["role"], message["item_id"]))
             assert seen == [("user", "msg_a"), ("assistant", "msg_b")]
 
+    def test_a_session_can_opt_out_of_the_stream(self, setup):
+        app, _ = setup
+        with local_client(app) as client, client.websocket_connect("/v1/realtime?mirror=off") as ws:
+            ws.receive_json()
+            ws.send_json(
+                {
+                    "type": "conversation.item.create",
+                    "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "private"}]},
+                }
+            )
+            ws.receive_json()  # conversation.item.created
+            with client.websocket_connect("/v1/stream") as observer:
+                assert observer.receive_json()["active_sessions"] == []
+
     def test_a_late_observer_is_told_which_sessions_are_live(self, setup):
         app, _ = setup
         with local_client(app) as client, client.websocket_connect("/v1/realtime") as ws:
@@ -474,3 +488,31 @@ class TestStreamEndpoint:
         with TestClient(app, client=("203.0.113.9", 50000)) as client, pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/v1/stream"):
                 pass
+
+
+class TestAgentWorkingDirectory:
+    def test_a_valid_directory_reaches_the_connections_runtime_config(self, tmp_path):
+        service = RealtimeService(text_prompt_queue=Queue(), should_listen=ThreadingEvent())
+        with_cwd = service.register(agent_cwd=str(tmp_path))
+        without = service.register()
+        assert service._conns[with_cwd].runtime_config.agent_cwd == str(tmp_path)
+        assert service._conns[without].runtime_config.agent_cwd is None
+
+    def test_a_websocket_with_a_valid_directory_connects(self, setup, tmp_path):
+        app, _ = setup
+        with local_client(app) as client, client.websocket_connect(f"/v1/realtime?cwd={tmp_path}") as ws:
+            assert ws.receive_json()["type"] == "session.created"
+
+    def test_a_missing_or_relative_directory_is_refused_with_a_reason(self, setup, tmp_path):
+        app, _ = setup
+        for bad in (str(tmp_path / "nope"), "relative/dir"):
+            with local_client(app) as client, client.websocket_connect(f"/v1/realtime?cwd={bad}") as ws:
+                event = ws.receive_json()
+                assert event["type"] == "error"
+                assert event["error"]["type"] == "invalid_cwd"
+
+    def test_no_directory_leaves_the_servers_default(self):
+        from speech_to_speech.api.openai_realtime.websocket_router import _requested_agent_cwd
+
+        assert _requested_agent_cwd(None) is None
+        assert _requested_agent_cwd("  ") is None

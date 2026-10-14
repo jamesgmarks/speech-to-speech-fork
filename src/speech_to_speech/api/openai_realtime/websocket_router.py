@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from queue import Empty, Queue
 from threading import Event as ThreadingEvent
 from typing import Any, Callable, TypeVar, cast
@@ -235,6 +236,16 @@ def _flush_queue(
             for item in reversed(preserved):
                 q.queue.appendleft(item)
             q.not_empty.notify(len(preserved))
+
+
+def _requested_agent_cwd(raw: str | None) -> str | None:
+    """The working directory a client asked the Claude agent to use (`?cwd=`), or None. Must be an existing absolute directory."""
+    if raw is None or not raw.strip():
+        return None
+    path = Path(raw).expanduser()
+    if not path.is_absolute() or not path.is_dir():
+        raise ValueError(f"The working directory must be an existing absolute directory: {raw}")
+    return str(path.resolve())
 
 
 def _clean_unit(
@@ -879,8 +890,17 @@ def create_app(
             protocol.strip() for protocol in ws.headers.get("sec-websocket-protocol", "").split(",")
         }
         await ws.accept(subprotocol="realtime" if "realtime" in offered_subprotocols else None)
+        try:
+            agent_cwd = _requested_agent_cwd(ws.query_params.get("cwd"))
+        except ValueError as exc:
+            await send_ws_event(ws, build_error_event(str(exc), error_type="invalid_cwd"))
+            await ws.close(code=1008, reason="Invalid working directory")
+            return
 
-        transport = ObservedTransport(WebSocketTransport(ws), stream_hub)
+        # `?mirror=off` keeps a session out of /v1/stream, e.g. the widget's voice preview.
+        transport: SessionTransport = WebSocketTransport(ws)
+        if ws.query_params.get("mirror") != "off":
+            transport = ObservedTransport(transport, stream_hub)
         unit = await _claim_after_disconnect(transport)
         if unit is None:
             logger.warning(f"Rejected connection: all {len(pool)} pipeline slots in use")
@@ -903,10 +923,11 @@ def create_app(
         session_id = ""
         try:
             session_id = unit.service.register(
-                ws.query_params.get("conversation_key"), ws.query_params.get("conversation_backend")
+                ws.query_params.get("conversation_key"), ws.query_params.get("conversation_backend"), agent_cwd
             )
             unit.session.session_id = session_id
-            transport.start(session_id)
+            if isinstance(transport, ObservedTransport):
+                transport.start(session_id)
             logger.info(f"Client connected to pipeline {unit.index} (session {session_id})")
 
             # Defensive: drain edge queues and reset events so stale data from a
@@ -1028,6 +1049,10 @@ def create_app(
                 status_code=415,
                 media_type="text/plain",
             )
+        try:
+            agent_cwd = _requested_agent_cwd(request.query_params.get("cwd"))
+        except ValueError as exc:
+            return Response(content=str(exc), status_code=400, media_type="text/plain")
         offer_sdp = (await request.body()).decode("utf-8")
 
         # Claim with a placeholder transport; the send loop tolerates a
@@ -1047,7 +1072,9 @@ def create_app(
         pipeline_log_ctx.set(unit.index)
         try:
             session_id = unit.service.register(
-                request.query_params.get("conversation_key"), request.query_params.get("conversation_backend")
+                request.query_params.get("conversation_key"),
+                request.query_params.get("conversation_backend"),
+                agent_cwd,
             )
             assert unit.session is not None
             unit.session.session_id = session_id

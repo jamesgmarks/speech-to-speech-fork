@@ -412,8 +412,13 @@ class RealtimeService:
 
     # ── Connection lifecycle ─────────────────────
 
-    def register(self, conversation_key: str | None = None, previous_backend: str | None = None) -> str:
-        """Register a new connection and return its session_id."""
+    def register(
+        self, conversation_key: str | None = None, previous_backend: str | None = None, agent_cwd: str | None = None
+    ) -> str:
+        """Register a new connection and return its session_id.
+
+        `agent_cwd` is the working directory the Claude agent uses for this connection (default: the server's).
+        """
         if self.speculative_turns:
             self.speculative_turns.reset()
         chat = Chat(self._chat_size)
@@ -435,6 +440,7 @@ class RealtimeService:
                     instructions=self._effective_default_instructions(),
                 ),
                 agent_permission_mode=self.default_agent_permission_mode,
+                agent_cwd=agent_cwd,
             ),
         )
         self._conns[state.session_id] = state

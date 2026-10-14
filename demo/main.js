@@ -1314,7 +1314,6 @@ async function handleStartError(err) {
 }
 
 micBtn.addEventListener("click", () => {
-  if (!micStream || !client) return;
   micMuted = !micMuted;
   syncMicMuteState();
   micBtn.classList.toggle("muted", micMuted);
